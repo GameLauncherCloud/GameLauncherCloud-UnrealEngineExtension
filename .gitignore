@@ -14,6 +14,7 @@ Build/
 # Game Launcher Cloud
 GLC_Upload/
 Builds/
+Plugins/GameLauncherCloud/Config/glc_config.json
 
 # Visual Studio
 .vs/
