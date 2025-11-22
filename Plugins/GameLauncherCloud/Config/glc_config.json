@@ -1,7 +1,7 @@
 {
 	"apiKeyProduction": "glc_rLwDO0ExxFlilfGz9S0zwkThZpjXMZ9c6p2Ae0yY6JYkt4AThe08WHHPUI75y4ga",
-	"authToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzNTMyNjVhMy00NGZiLTQ0Y2ItODg5MC1jNzkyN2YzYzRjZWYiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjkzZTdmNzRmLWE1MDQtNGUyNi05NGJmLWJlY2QzZTI5NjcwYSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6ImNhcmxvc2FydHVyb3JzQGdtYWlsLmNvbSIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkFkbWluIiwiZXhwIjoxNzY0NDA3MTgxLCJpc3MiOiJodHRwczovL2FwaS5nYW1lbGF1bmNoZXIuY2xvdWQiLCJhdWQiOiJodHRwczovL2FwcC5nYW1lbGF1bmNoZXIuY2xvdWQifQ.SmKpr6mNtYCt9RTEQZoUA5uqxqyBupdjf1sN3UlS6ME",
-	"userEmail": "carlosarturors@gmail.com",
-	"userPlan": "Enterprise",
+	"authToken": "",
+	"userEmail": "",
+	"userPlan": "",
 	"apiUrl": "https://api.gamelauncher.cloud"
 }
