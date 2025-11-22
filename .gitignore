@@ -26,3 +26,4 @@ Config/glc_config.json
 # OS
 .DS_Store
 Thumbs.db
+Plugins/GameLauncherCloud/Config/glc_config.json
