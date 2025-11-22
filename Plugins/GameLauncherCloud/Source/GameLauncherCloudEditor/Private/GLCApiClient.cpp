@@ -39,20 +39,27 @@ bool FGLCApiClient::ExtractApiResult(TSharedPtr<FJsonObject> JsonObject, TShared
 		return false;
 	}
 	
+	// Check both camelCase and PascalCase for compatibility
 	bool IsSuccess = false;
-	if (JsonObject->TryGetBoolField(TEXT("isSuccess"), IsSuccess) && IsSuccess)
+	JsonObject->TryGetBoolField(TEXT("isSuccess"), IsSuccess) || JsonObject->TryGetBoolField(TEXT("IsSuccess"), IsSuccess);
+	
+	if (IsSuccess)
 	{
-		const TSharedPtr<FJsonObject>* ResultObject;
-		if (JsonObject->TryGetObjectField(TEXT("result"), ResultObject))
+		const TSharedPtr<FJsonObject>* ResultObject = nullptr;
+		if (JsonObject->TryGetObjectField(TEXT("result"), ResultObject) || JsonObject->TryGetObjectField(TEXT("Result"), ResultObject))
 		{
-			OutResult = *ResultObject;
-			return true;
+			if (ResultObject && (*ResultObject).IsValid())
+			{
+				OutResult = *ResultObject;
+				return true;
+			}
 		}
 	}
 	
-	// Extract error messages
-	const TArray<TSharedPtr<FJsonValue>>* ErrorMessages;
-	if (JsonObject->TryGetArrayField(TEXT("errorMessages"), ErrorMessages) && ErrorMessages->Num() > 0)
+	// Extract error messages (try both camelCase and PascalCase)
+	const TArray<TSharedPtr<FJsonValue>>* ErrorMessages = nullptr;
+	if ((JsonObject->TryGetArrayField(TEXT("errorMessages"), ErrorMessages) || JsonObject->TryGetArrayField(TEXT("ErrorMessages"), ErrorMessages)) 
+		&& ErrorMessages && ErrorMessages->Num() > 0)
 	{
 		OutError = (*ErrorMessages)[0]->AsString();
 	}
@@ -66,14 +73,17 @@ bool FGLCApiClient::ExtractApiResult(TSharedPtr<FJsonObject> JsonObject, TShared
 
 void FGLCApiClient::LoginWithApiKeyAsync(const FString& ApiKey, TFunction<void(bool, FString, FGLCLoginResponse)> Callback)
 {
-	UE_LOG(LogTemp, Log, TEXT("[GLC] LoginWithApiKey started"));
+	UE_LOG(LogTemp, Warning, TEXT("[GLC] === LoginWithApiKey ASYNC Started ==="));
 	
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-	Request->SetURL(BaseUrl + TEXT("/api/cli/build/login-interactive"));
+	FString Url = BaseUrl + TEXT("/api/cli/build/login-interactive");
+	Request->SetURL(Url);
 	Request->SetVerb(TEXT("POST"));
 	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	
-	// Create request body
+	UE_LOG(LogTemp, Log, TEXT("[GLC] URL: %s"), *Url);
+	
+	// Create request body with camelCase to match Unity
 	TSharedPtr<FJsonObject> RequestObject = MakeShareable(new FJsonObject);
 	RequestObject->SetStringField(TEXT("apiKey"), ApiKey);
 	
@@ -81,6 +91,8 @@ void FGLCApiClient::LoginWithApiKeyAsync(const FString& ApiKey, TFunction<void(b
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
 	FJsonSerializer::Serialize(RequestObject.ToSharedRef(), Writer);
 	Request->SetContentAsString(RequestBody);
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Request body: %s"), *RequestBody);
 	
 	Request->OnProcessRequestComplete().BindLambda([this, Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
 	{
@@ -93,22 +105,61 @@ void FGLCApiClient::LoginWithApiKeyAsync(const FString& ApiKey, TFunction<void(b
 			return;
 		}
 		
+		int32 StatusCode = Response->GetResponseCode();
 		FString ResponseString = Response->GetContentAsString();
+		
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Response status: %d"), StatusCode);
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Response body: %s"), *ResponseString);
+		
+		if (StatusCode != 200)
+		{
+			TSharedPtr<FJsonObject> JsonObject = ParseJsonResponse(ResponseString);
+			FString ErrorMsg = FString::Printf(TEXT("HTTP %d"), StatusCode);
+			
+			if (JsonObject.IsValid())
+			{
+				const TArray<TSharedPtr<FJsonValue>>* ErrorMessages = nullptr;
+				if (JsonObject->TryGetArrayField(TEXT("errorMessages"), ErrorMessages) && ErrorMessages && ErrorMessages->Num() > 0)
+				{
+					ErrorMsg = (*ErrorMessages)[0]->AsString();
+				}
+			}
+			
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Login failed: %s"), *ErrorMsg);
+			Callback(false, ErrorMsg, LoginResponse);
+			return;
+		}
+		
 		TSharedPtr<FJsonObject> JsonObject = ParseJsonResponse(ResponseString);
+		
+		if (!JsonObject.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Failed to parse JSON response"));
+			Callback(false, TEXT("Invalid JSON response"), LoginResponse);
+			return;
+		}
+		
 		TSharedPtr<FJsonObject> ResultObject;
 		FString ErrorMessage;
 		
 		if (ExtractApiResult(JsonObject, ResultObject, ErrorMessage))
 		{
-			// Parse login response
+			// Parse login response (camelCase to match backend)
 			ResultObject->TryGetStringField(TEXT("id"), LoginResponse.Id);
 			ResultObject->TryGetStringField(TEXT("username"), LoginResponse.Username);
 			ResultObject->TryGetStringField(TEXT("email"), LoginResponse.Email);
 			ResultObject->TryGetStringField(TEXT("token"), LoginResponse.Token);
 			
+			if (LoginResponse.Token.IsEmpty())
+			{
+				UE_LOG(LogTemp, Error, TEXT("[GLC] Login response missing token"));
+				Callback(false, TEXT("Login response missing token"), LoginResponse);
+				return;
+			}
+			
 			// Parse roles
-			const TArray<TSharedPtr<FJsonValue>>* RolesArray;
-			if (ResultObject->TryGetArrayField(TEXT("roles"), RolesArray))
+			const TArray<TSharedPtr<FJsonValue>>* RolesArray = nullptr;
+			if (ResultObject->TryGetArrayField(TEXT("roles"), RolesArray) && RolesArray)
 			{
 				for (const TSharedPtr<FJsonValue>& RoleValue : *RolesArray)
 				{
@@ -117,11 +168,11 @@ void FGLCApiClient::LoginWithApiKeyAsync(const FString& ApiKey, TFunction<void(b
 			}
 			
 			// Parse subscription plan
-			const TSharedPtr<FJsonObject>* SubscriptionObject;
-			if (ResultObject->TryGetObjectField(TEXT("subscription"), SubscriptionObject))
+			const TSharedPtr<FJsonObject>* SubscriptionObject = nullptr;
+			if (ResultObject->TryGetObjectField(TEXT("subscription"), SubscriptionObject) && SubscriptionObject && (*SubscriptionObject).IsValid())
 			{
-				const TSharedPtr<FJsonObject>* PlanObject;
-				if ((*SubscriptionObject)->TryGetObjectField(TEXT("plan"), PlanObject))
+				const TSharedPtr<FJsonObject>* PlanObject = nullptr;
+				if ((*SubscriptionObject)->TryGetObjectField(TEXT("plan"), PlanObject) && PlanObject && (*PlanObject).IsValid())
 				{
 					(*PlanObject)->TryGetStringField(TEXT("name"), LoginResponse.PlanName);
 				}

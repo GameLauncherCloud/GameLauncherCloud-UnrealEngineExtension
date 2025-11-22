@@ -54,9 +54,9 @@ A powerful Unreal Engine Editor plugin that allows you to build and upload your 
 
 ### Step 1: Get Your API Key
 
-1. Go to [Game Launcher Cloud Dashboard](https://app.gamelauncher.cloud)
-2. Navigate to **Settings > API Keys**
-3. Click **Create New API Key**
+1. Go to [Game Launcher Cloud API Keys](https://app.gamelauncher.cloud/user/api-keys)
+2. Click **Create New API Key**
+3. Give it a name (e.g., "Unreal Engine Plugin")
 4. Copy your API key
 
 ### Step 2: Open the Manager

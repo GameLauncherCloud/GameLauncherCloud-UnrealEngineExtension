@@ -10,11 +10,10 @@ Before you start, make sure you have:
 
 ### 🔑 Step 1: Get Your API Key
 
-1. Log in to [Game Launcher Cloud Dashboard](https://app.gamelauncher.cloud)
-2. Navigate to **Settings** → **API Keys**
-3. Click **Create New API Key**
-4. Give it a name (e.g., "Unreal Engine Plugin")
-5. **Copy the API key** (you won't be able to see it again!)
+1. Log in to [Game Launcher Cloud API Keys](https://app.gamelauncher.cloud/user/api-keys)
+2. Click **Create New API Key**
+3. Give it a name (e.g., "Unreal Engine Plugin")
+4. **Copy the API key** (you won't be able to see it again!)
 
 ### 📥 Step 2: Install the Plugin
 

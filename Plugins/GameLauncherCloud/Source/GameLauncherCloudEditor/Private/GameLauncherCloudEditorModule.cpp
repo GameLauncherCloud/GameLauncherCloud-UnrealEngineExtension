@@ -8,6 +8,8 @@
 #include "WorkspaceMenuStructureModule.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Styling/SlateStyleRegistry.h"
+#include "Interfaces/IPluginManager.h"
 
 static const FName GLCManagerTabName("GLCManager");
 
@@ -15,6 +17,18 @@ static const FName GLCManagerTabName("GLCManager");
 
 void FGameLauncherCloudEditorModule::StartupModule()
 {
+	// Initialize style
+	StyleSet = MakeShareable(new FSlateStyleSet("GameLauncherCloudStyle"));
+	
+	// Find plugin content directory
+	FString ContentDir = IPluginManager::Get().FindPlugin("GameLauncherCloud")->GetBaseDir() / TEXT("Resources");
+	StyleSet->SetContentRoot(ContentDir);
+	
+	// Register icon
+	StyleSet->Set("GameLauncherCloud.Icon", new FSlateImageBrush(StyleSet->RootToContentDir(TEXT("GameLauncherCloud_Icon.png")), FVector2D(48.0f, 48.0f)));
+	
+	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
+	
 	// Register commands
 	FGLCCommands::Register();
 	
@@ -51,6 +65,13 @@ void FGameLauncherCloudEditorModule::ShutdownModule()
 	FGLCCommands::Unregister();
 
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GLCManagerTabName);
+	
+	// Unregister style
+	if (StyleSet.IsValid())
+	{
+		FSlateStyleRegistry::UnRegisterSlateStyle(*StyleSet);
+		StyleSet.Reset();
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("GameLauncherCloud Editor Module Shutdown"));
 }

@@ -32,7 +32,7 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 	SelectedAppIndex = 0;
 	CurrentBuildId = 0;
 	
-	ApiUrl = TEXT("https://app.gamelauncher.cloud");
+	ApiUrl = TEXT("https://api.gamelauncher.cloud");
 	
 	LoadConfig();
 	
@@ -47,21 +47,35 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(20.0f, 20.0f, 20.0f, 10.0f)
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 15.0f, 0.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Game Launcher Cloud"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 24))
+				SNew(SImage)
+				.Image(FSlateIcon("GameLauncherCloudStyle", "GameLauncherCloud.Icon").GetIcon())
+				.DesiredSizeOverride(FVector2D(48.0f, 48.0f))
 			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Subtitle", "Build and Upload Manager for Unreal Engine"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-				.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("Title", "Game Launcher Cloud"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 24))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("Subtitle", "Build and Upload Manager for Unreal Engine"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+				]
 			]
 		]
 		
@@ -80,7 +94,7 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 			SNew(SScrollBox)
 			+ SScrollBox::Slot()
 			[
-				SNew(SVerticalBox)
+				SAssignNew(MainContentBox, SVerticalBox)
 				
 				// Show login or build/upload based on auth state
 				+ SVerticalBox::Slot()
@@ -164,7 +178,7 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructLoginTab()
 		.Padding(0.0f, 20.0f, 0.0f, 0.0f)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("GetApiKeyInfo", "Get your API Key from:\nhttps://app.gamelauncher.cloud/dashboard/settings/api-keys"))
+			.Text(LOCTEXT("GetApiKeyInfo", "Get your API Key from:\nhttps://app.gamelauncher.cloud/user/api-keys"))
 			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 10))
 			.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
 		];
@@ -324,12 +338,21 @@ FReply SGLCManagerWindow::OnLoginWithApiKeyClicked()
 	{
 		StatusMessage = TEXT("Please enter an API Key");
 		StatusMessageType = TEXT("Error");
+		if (StatusMessageText.IsValid())
+		{
+			StatusMessageText->SetText(FText::FromString(StatusMessage));
+		}
 		return FReply::Handled();
 	}
 	
 	bIsLoggingIn = true;
 	StatusMessage = TEXT("Logging in...");
 	StatusMessageType = TEXT("Info");
+	
+	if (StatusMessageText.IsValid())
+	{
+		StatusMessageText->SetText(FText::FromString(StatusMessage));
+	}
 	
 	ApiClient->LoginWithApiKeyAsync(ApiKeyInput, [this](bool bSuccess, FString Message, FGLCLoginResponse Response)
 	{
@@ -346,13 +369,21 @@ FReply SGLCManagerWindow::OnLoginWithApiKeyClicked()
 			StatusMessage = TEXT("Login successful!");
 			StatusMessageType = TEXT("Success");
 			
-			// Reload UI
-			Construct(FArguments());
+			// Refresh UI to show build/upload interface
+			RefreshUI();
+			
+			// Auto-load apps after successful login
+			OnLoadAppsClicked();
 		}
 		else
 		{
 			StatusMessage = Message;
 			StatusMessageType = TEXT("Error");
+			
+			if (StatusMessageText.IsValid())
+			{
+				StatusMessageText->SetText(FText::FromString(StatusMessage));
+			}
 		}
 	});
 	
@@ -371,8 +402,8 @@ FReply SGLCManagerWindow::OnLogoutClicked()
 	
 	StatusMessage.Empty();
 	
-	// Reload UI
-	Construct(FArguments());
+	// Refresh UI to show login interface
+	RefreshUI();
 	
 	return FReply::Handled();
 }
@@ -520,6 +551,36 @@ int64 SGLCManagerWindow::GetDirectorySize(const FString& DirectoryPath)
 	});
 	
 	return TotalSize;
+}
+
+void SGLCManagerWindow::RefreshUI()
+{
+	if (!MainContentBox.IsValid())
+	{
+		return;
+	}
+	
+	// Clear existing content
+	MainContentBox->ClearChildren();
+	
+	// Add new content based on authentication state
+	MainContentBox->AddSlot()
+	.AutoHeight()
+	[
+		SNew(SBorder)
+		.Padding(20.0f)
+		[
+			bIsAuthenticated ? ConstructBuildUploadTab() : ConstructLoginTab()
+		]
+	];
+	
+	// Add tips section
+	MainContentBox->AddSlot()
+	.AutoHeight()
+	.Padding(0.0f, 20.0f, 0.0f, 0.0f)
+	[
+		ConstructTipsTab()
+	];
 }
 
 #undef LOCTEXT_NAMESPACE

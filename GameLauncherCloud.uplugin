@@ -10,7 +10,7 @@
 	"DocsURL": "https://help.gamelauncher.cloud",
 	"MarketplaceURL": "",
 	"SupportURL": "https://discord.com/invite/FpWvUQ2CJP",
-	"CanContainContent": false,
+	"CanContainContent": true,
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,

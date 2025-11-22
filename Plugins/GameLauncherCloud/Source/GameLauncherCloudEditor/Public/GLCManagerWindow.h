@@ -76,9 +76,13 @@ private:
 	FTimerHandle BuildStatusTimerHandle;
 	
 	// ========== UI WIDGETS ========== //
+	TSharedPtr<SVerticalBox> MainContentBox;
 	TSharedPtr<SEditableTextBox> ApiKeyTextBox;
 	TSharedPtr<SEditableTextBox> BuildNotesTextBox;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> AppComboBox;
 	TSharedPtr<SProgressBar> UploadProgressBar;
 	TSharedPtr<STextBlock> StatusMessageText;
+	
+	// ========== UI REFRESH ========== //
+	void RefreshUI();
 };

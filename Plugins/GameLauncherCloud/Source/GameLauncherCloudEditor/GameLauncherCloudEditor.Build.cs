@@ -16,7 +16,8 @@ new string[]
 "GameLauncherCloud",
 "HTTP",
 "Json",
-"JsonUtilities"
+"JsonUtilities",
+"Projects"
 }
 );
 

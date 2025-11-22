@@ -26,4 +26,5 @@ private:
 	void RegisterMenus();
 
 	TSharedPtr<class FUICommandList> PluginCommands;
+	TSharedPtr<class FSlateStyleSet> StyleSet;
 };
