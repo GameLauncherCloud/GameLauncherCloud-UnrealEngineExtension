@@ -17,6 +17,10 @@
 #include "Serialization/JsonWriter.h"
 #include "TimerManager.h"
 #include "Editor.h"
+#include "HAL/PlatformProcess.h"
+#include "Async/Async.h"
+#include "Misc/App.h"
+#include "Misc/MessageDialog.h"
 
 #define LOCTEXT_NAMESPACE "GLCManagerWindow"
 
@@ -33,15 +37,23 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 	CurrentBuildId = 0;
 	CurrentEnvironment = TEXT("Production");
 	
+	// Initialize build detection
+	bHasBuildReady = false;
+	LastBuildSize = 0;
+	UncompressedBuildSize = 0;
+	TotalFileCount = 0;
+	bIsCompressed = false;
+	
 	ApiUrl = TEXT("https://api.gamelauncher.cloud");
 	
 	LoadConfig();
 	
 	ApiClient = MakeShareable(new FGLCApiClient(ApiUrl, AuthToken));
 	
-	// Auto-load apps if already authenticated
+	// Auto-load apps and check builds if already authenticated
 	if (bIsAuthenticated && !AuthToken.IsEmpty())
 	{
+		CheckForExistingBuild();
 		OnLoadAppsClicked();
 	}
 	
@@ -401,6 +413,7 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 						]
 						+ SHorizontalBox::Slot()
 						.AutoWidth()
+						.Padding(5.0f, 0.0f, 0.0f, 0.0f)
 						[
 							SNew(SButton)
 							.ButtonStyle(FAppStyle::Get(), "FlatButton.Info")
@@ -415,6 +428,22 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 										LOCTEXT("LoadingApps", "⏳ Loading...") : 
 										LOCTEXT("LoadAppsButton", "🔄 Reload Apps");
 								})
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+							]
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(5.0f, 0.0f, 0.0f, 0.0f)
+						[
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "FlatButton.Default")
+							.ForegroundColor(FLinearColor(0.9f, 0.95f, 1.0f))
+							.ContentPadding(FMargin(15.0f, 8.0f))
+							.OnClicked(this, &SGLCManagerWindow::OnManageAppClicked)
+							.IsEnabled_Lambda([this]() { return AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
+							[
+								SNew(STextBlock)
+								.Text(LOCTEXT("ManageAppButton", "⚙️ Manage App"))
 								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
 							]
 						]
@@ -446,6 +475,120 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 			]
 		
 			
+			// Open Dashboard button
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "FlatButton.Info")
+				.ForegroundColor(FLinearColor::White)
+				.ContentPadding(FMargin(20.0f, 10.0f))
+				.HAlign(HAlign_Center)
+				.OnClicked(this, &SGLCManagerWindow::OnDashboardClicked)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("DashboardButton", "📊 Open Dashboard"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+				]
+			]
+			
+			// Build detection card
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 15.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.15f, 0.3f, 0.2f, 0.85f))
+				.Padding(FMargin(20.0f, 15.0f))
+				.Visibility_Lambda([this]() { return bHasBuildReady ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+					SNew(SVerticalBox)
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("BuildReadyTitle", "✓ Build Ready"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+						.ColorAndOpacity(FLinearColor(0.2f, 0.9f, 0.3f))
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							return FText::Format(LOCTEXT("LastBuildDate", "Last build: {0}"),
+								FText::FromString(LastBuildDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+						.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 5.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							if (bIsCompressed && UncompressedBuildSize > 0)
+							{
+								float compressionRatio = (1.0f - (LastBuildSize / (float)UncompressedBuildSize)) * 100.0f;
+								return FText::Format(LOCTEXT("BuildInfoCompressed", "Files: {0} | Uncompressed: {1} MB | Compressed: {2} MB ({3}% saved)"),
+									FText::AsNumber(TotalFileCount),
+									FText::AsNumber((int32)(UncompressedBuildSize / (1024.0 * 1024.0))),
+									FText::AsNumber((int32)(LastBuildSize / (1024.0 * 1024.0))),
+									FText::AsNumber((int32)compressionRatio));
+							}
+							else if (bIsCompressed)
+							{
+								return FText::Format(LOCTEXT("BuildInfoCompressedOnly", "Compressed size: {0} MB"),
+									FText::AsNumber((int32)(LastBuildSize / (1024.0 * 1024.0))));
+							}
+							else
+							{
+								return FText::Format(LOCTEXT("BuildInfoUncompressed", "Files: {0} | Size: {1} MB (Not compressed)"),
+									FText::AsNumber(TotalFileCount),
+									FText::AsNumber((int32)(LastBuildSize / (1024.0 * 1024.0))));
+							}
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+						.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+					]
+					
+					// Show in Explorer button (only if compressed)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ButtonStyle(FAppStyle::Get(), "FlatButton.Default")
+						.ForegroundColor(FLinearColor(0.9f, 0.95f, 1.0f))
+						.ContentPadding(FMargin(12.0f, 6.0f))
+						.HAlign(HAlign_Left)
+						.OnClicked_Lambda([this]() -> FReply {
+							FString ZipPath = GetZipPath();
+							if (FPaths::FileExists(ZipPath))
+							{
+								FPlatformProcess::ExploreFolder(*FPaths::GetPath(ZipPath));
+							}
+							return FReply::Handled();
+						})
+						.Visibility_Lambda([this]() { 
+							return (bIsCompressed && FPaths::FileExists(GetZipPath())) ? EVisibility::Visible : EVisibility::Collapsed; 
+						})
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("ShowInExplorer", "📁 Show in Explorer"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+						]
+					]
+				]
+			]
+			
 			// Build notes section
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -467,37 +610,67 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 					]
 					
 					+ SVerticalBox::Slot()
-					.AutoHeight()
+					.FillHeight(1.0f)
 					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 					[
-						SAssignNew(BuildNotesTextBox, SEditableTextBox)
-						.HintText(LOCTEXT("BuildNotesHint", "What's new in this build?"))
-						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-						.OnTextChanged_Lambda([this](const FText& NewText) { BuildNotesInput = NewText.ToString(); })
+						SNew(SBox)
+						.HeightOverride(100.0f)
+						[
+							SAssignNew(BuildNotesTextBox, SEditableTextBox)
+							.HintText(LOCTEXT("BuildNotesHint", "What's new in this build?"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+							.OnTextChanged_Lambda([this](const FText& NewText) { BuildNotesInput = NewText.ToString(); })
+						]
 					]
 				]
 			]
 			
-			// Build & Upload button
+			// Build & Upload buttons
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(0.0f, 20.0f)
 			.HAlign(HAlign_Center)
 			[
-				SNew(SButton)
-				.ButtonStyle(FAppStyle::Get(), "FlatButton.Success")
-				.ForegroundColor(FLinearColor::White)
-				.ContentPadding(FMargin(50.0f, 15.0f))
-				.OnClicked(this, &SGLCManagerWindow::OnBuildAndUploadClicked)
-				.IsEnabled_Lambda([this]() { return !bIsBuilding && !bIsUploading && AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
+				SNew(SHorizontalBox)
+				
+				// Build button
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(5.0f, 0.0f)
 				[
-					SNew(STextBlock)
-					.Text_Lambda([this]() {
-						if (bIsBuilding) return LOCTEXT("Building", "🔨 Building...");
-						if (bIsUploading) return LOCTEXT("Uploading", "⬆️ Uploading...");
-						return LOCTEXT("BuildUploadButton", "🚀 Build & Upload to Cloud");
-					})
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "FlatButton.Success")
+					.ForegroundColor(FLinearColor::White)
+					.ContentPadding(FMargin(40.0f, 15.0f))
+					.OnClicked(this, &SGLCManagerWindow::OnBuildOnlyClicked)
+					.IsEnabled_Lambda([this]() { return !bIsBuilding && !bIsUploading && AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							return bIsBuilding ? LOCTEXT("Building", "🔨 Building...") : LOCTEXT("BuildButton", "🔨 Build");
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+					]
+				]
+				
+				// Upload button
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(5.0f, 0.0f)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "FlatButton.Info")
+					.ForegroundColor(FLinearColor::White)
+					.ContentPadding(FMargin(40.0f, 15.0f))
+					.OnClicked(this, &SGLCManagerWindow::OnUploadOnlyClicked)
+					.IsEnabled_Lambda([this]() { return !bIsBuilding && !bIsUploading && bHasBuildReady && AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							return bIsUploading ? LOCTEXT("Uploading", "☁️ Uploading...") : LOCTEXT("UploadButton", "☁️ Upload to Cloud");
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+					]
 				]
 			]
 		
@@ -518,7 +691,27 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 				]
 			]
 			
-			// Status message
+			// Loading apps message (only when loading apps)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 10.0f)
+			.HAlign(HAlign_Center)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.3f, 0.6f, 0.9f, 0.8f))
+				.Padding(FMargin(20.0f, 12.0f))
+				.Visibility_Lambda([this]() { return bIsLoadingApps ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("LoadingApps", "Loading apps..."))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+					.ColorAndOpacity(FLinearColor::White)
+					.Justification(ETextJustify::Center)
+				]
+			]
+			
+			// Status message (for build/upload operations)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(0.0f, 10.0f)
@@ -534,7 +727,9 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 						FLinearColor(0.3f, 0.6f, 0.9f, 0.8f);
 				})
 				.Padding(FMargin(20.0f, 12.0f))
-				.Visibility_Lambda([this]() { return StatusMessage.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				.Visibility_Lambda([this]() { 
+					return !StatusMessage.IsEmpty() && !bIsLoadingApps ? EVisibility::Visible : EVisibility::Collapsed; 
+				})
 				[
 					SAssignNew(StatusMessageText, STextBlock)
 					.Text(FText::FromString(StatusMessage))
@@ -725,7 +920,7 @@ FReply SGLCManagerWindow::OnLoadAppsClicked()
 			{
 				SelectedApp = AppNames[0];
 				SelectedAppIndex = 0;
-				StatusMessage.Empty(); // Clear loading message
+				StatusMessage = FString::Printf(TEXT("Loaded %d apps successfully"), Apps.Num());
 				StatusMessageType = TEXT("Success");
 			}
 			else
@@ -885,6 +1080,9 @@ void SGLCManagerWindow::RefreshUI()
 	// Clear existing content
 	MainContentBox->ClearChildren();
 	
+	// Check for existing build before refreshing
+	CheckForExistingBuild();
+	
 	// Add new content based on authentication state
 	MainContentBox->AddSlot()
 	.AutoHeight()
@@ -903,6 +1101,853 @@ void SGLCManagerWindow::RefreshUI()
 	[
 		ConstructTipsTab()
 	];
+}
+
+FString SGLCManagerWindow::GetBuildSourcePath() const
+{
+	FString BaseUploadPath = FPaths::ProjectDir() / TEXT("Builds/GLC_Upload");
+	FString WindowsPath = BaseUploadPath / TEXT("Windows");
+	FString MacPath = BaseUploadPath / TEXT("Mac");
+	FString LinuxPath = BaseUploadPath / TEXT("Linux");
+	
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	
+	if (PlatformFile.DirectoryExists(*WindowsPath))
+	{
+		return WindowsPath;
+	}
+	else if (PlatformFile.DirectoryExists(*MacPath))
+	{
+		return MacPath;
+	}
+	else if (PlatformFile.DirectoryExists(*LinuxPath))
+	{
+		return LinuxPath;
+	}
+	
+	return BaseUploadPath;
+}
+
+FString SGLCManagerWindow::GetZipPath() const
+{
+	return FPaths::ProjectDir() / TEXT("Builds") / FString::Printf(TEXT("%s_upload.zip"), FApp::GetProjectName());
+}
+
+void SGLCManagerWindow::CheckForExistingBuild()
+{
+	FString ZipPath = GetZipPath();
+	FString BuildPath = GetBuildSourcePath();
+	
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	
+	// Check if compressed build exists
+	if (PlatformFile.FileExists(*ZipPath))
+	{
+		bHasBuildReady = true;
+		LastBuildDate = PlatformFile.GetTimeStamp(*ZipPath);
+		LastBuildPath = ZipPath;
+		LastBuildSize = PlatformFile.FileSize(*ZipPath);
+		bIsCompressed = true;
+		
+		// Get uncompressed size and file count from build directory if it exists
+		if (!BuildPath.IsEmpty() && PlatformFile.DirectoryExists(*BuildPath))
+		{
+			TArray<FString> Files;
+			PlatformFile.FindFilesRecursively(Files, *BuildPath, nullptr);
+			TotalFileCount = Files.Num();
+			
+			UncompressedBuildSize = 0;
+			for (const FString& File : Files)
+			{
+				UncompressedBuildSize += PlatformFile.FileSize(*File);
+			}
+		}
+		else
+		{
+			TotalFileCount = 0;
+			UncompressedBuildSize = 0;
+		}
+	}
+	// Check if uncompressed build exists
+	else if (!BuildPath.IsEmpty() && PlatformFile.DirectoryExists(*BuildPath))
+	{
+		bHasBuildReady = true;
+		LastBuildDate = PlatformFile.GetTimeStamp(*BuildPath);
+		LastBuildPath = BuildPath;
+		bIsCompressed = false;
+		
+		// Calculate directory size and file count
+		TArray<FString> Files;
+		PlatformFile.FindFilesRecursively(Files, *BuildPath, nullptr);
+		TotalFileCount = Files.Num();
+		
+		LastBuildSize = 0;
+		for (const FString& File : Files)
+		{
+			LastBuildSize += PlatformFile.FileSize(*File);
+		}
+		UncompressedBuildSize = LastBuildSize;
+	}
+	else
+	{
+		bHasBuildReady = false;
+	}
+}
+
+FReply SGLCManagerWindow::OnBuildOnlyClicked()
+{
+	if (AvailableApps.Num() == 0 || SelectedAppIndex < 0)
+	{
+		StatusMessage = TEXT("Please select a valid app");
+		StatusMessageType = TEXT("Error");
+		return FReply::Handled();
+	}
+	
+	bIsBuilding = true;
+	StatusMessage = TEXT("Starting build process...");
+	StatusMessageType = TEXT("Info");
+	UploadProgress = 0.0f;
+	
+	// Start build in a separate thread
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this]()
+	{
+		BuildGame(true); // compressOnly = true
+	});
+	
+	return FReply::Handled();
+}
+
+FReply SGLCManagerWindow::OnUploadOnlyClicked()
+{
+	UE_LOG(LogTemp, Log, TEXT("[GLC] OnUploadOnlyClicked called"));
+	
+	if (AvailableApps.Num() == 0 || SelectedAppIndex < 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] No apps available or invalid selection"));
+		StatusMessage = TEXT("Please select a valid app");
+		StatusMessageType = TEXT("Error");
+		return FReply::Handled();
+	}
+	
+	if (!bHasBuildReady)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] No build ready"));
+		StatusMessage = TEXT("No build found. Please package your project first (File > Package Project) and place it in Builds/GLC_Upload/ folder.");
+		StatusMessageType = TEXT("Error");
+		return FReply::Handled();
+	}
+	
+	// Get paths using centralized helpers
+	FString ZipPath = GetZipPath();
+	FString BuildPath = GetBuildSourcePath();
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Checking for compressed build at: %s"), *ZipPath);
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Build source path: %s"), *BuildPath);
+	
+	if (!FPaths::FileExists(ZipPath))
+	{
+		// Need to compress first
+		StatusMessage = TEXT("Compressing build before upload...");
+		StatusMessageType = TEXT("Info");
+		bIsUploading = true;
+		UploadProgress = 0.0f;
+		
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Starting compression from %s to %s"), *BuildPath, *ZipPath);
+		
+		// Compress in background thread and WAIT for completion
+		AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, BuildPath, ZipPath]()
+		{
+			bool bSuccess = CompressBuild(BuildPath, ZipPath);
+			
+			// Return to main thread after compression completes
+			AsyncTask(ENamedThreads::GameThread, [this, bSuccess, ZipPath]()
+			{
+				if (bSuccess)
+				{
+					UE_LOG(LogTemp, Log, TEXT("[GLC] Compression successful, starting upload"));
+					// Now the ZIP exists, start upload
+					UploadBuildToCloud(ZipPath);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("[GLC] Compression failed"));
+					StatusMessage = TEXT("Failed to compress build");
+					StatusMessageType = TEXT("Error");
+					bIsUploading = false;
+					UploadProgress = 0.0f;
+				}
+			});
+		});
+	}
+	else
+	{
+		// Already compressed, start upload directly
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Build already compressed, starting upload"));
+		bIsUploading = true;
+		StatusMessage = TEXT("Starting upload...");
+		StatusMessageType = TEXT("Info");
+		UploadProgress = 0.0f;
+		
+		UploadBuildToCloud(ZipPath);
+	}
+	
+	return FReply::Handled();
+}
+
+FReply SGLCManagerWindow::OnDashboardClicked()
+{
+	FString DashboardUrl = TEXT("https://app.gamelauncher.cloud/dashboard");
+	FPlatformProcess::LaunchURL(*DashboardUrl, nullptr, nullptr);
+	return FReply::Handled();
+}
+
+FReply SGLCManagerWindow::OnManageAppClicked()
+{
+	if (AvailableApps.Num() == 0 || SelectedAppIndex < 0 || SelectedAppIndex >= AvailableApps.Num())
+	{
+		StatusMessage = TEXT("Please select a valid app");
+		StatusMessageType = TEXT("Error");
+		return FReply::Handled();
+	}
+	
+	int64 AppId = AvailableApps[SelectedAppIndex].Id;
+	FString ManageUrl = FString::Printf(TEXT("https://app.gamelauncher.cloud/apps/id/%lld/overview"), AppId);
+	FPlatformProcess::LaunchURL(*ManageUrl, nullptr, nullptr);
+	return FReply::Handled();
+}
+
+void SGLCManagerWindow::BuildGame(bool bCompressOnly)
+{
+	FString BuildPath = FPaths::ProjectDir() / TEXT("Builds") / TEXT("GLC_Upload");
+	FString ProjectFile = FPaths::GetProjectFilePath();
+	
+	// Get platform name
+	FString Platform = TEXT("Win64");
+	
+#if PLATFORM_MAC
+	Platform = TEXT("Mac");
+#elif PLATFORM_LINUX
+	Platform = TEXT("Linux");
+#endif
+	
+	// Get Unreal Engine path
+	FString EnginePath = FPaths::EngineDir();
+	FString UATPath = EnginePath / TEXT("Build/BatchFiles/RunUAT.bat");
+	
+#if PLATFORM_MAC || PLATFORM_LINUX
+	UATPath = EnginePath / TEXT("Build/BatchFiles/RunUAT.sh");
+#endif
+	
+	// Update status on main thread
+	AsyncTask(ENamedThreads::GameThread, [this]()
+	{
+		StatusMessage = TEXT("Building project... This may take several minutes.");
+		StatusMessageType = TEXT("Info");
+		UploadProgress = 0.1f;
+	});
+	
+	// Build command arguments
+	FString Arguments = FString::Printf(
+		TEXT("BuildCookRun -project=\"%s\" -platform=%s -clientconfig=Development -cook -stage -archive -archivedirectory=\"%s\" -build -noP4"),
+		*ProjectFile,
+		*Platform,
+		*BuildPath
+	);
+	
+	// Execute UAT
+	int32 ReturnCode = 0;
+	FString StdOut;
+	FString StdErr;
+	
+	FPlatformProcess::ExecProcess(*UATPath, *Arguments, &ReturnCode, &StdOut, &StdErr);
+	
+	// Update on main thread
+	AsyncTask(ENamedThreads::GameThread, [this, ReturnCode, BuildPath, bCompressOnly, StdErr]()
+	{
+		if (ReturnCode == 0)
+		{
+			StatusMessage = TEXT("Build completed successfully!");
+			StatusMessageType = TEXT("Success");
+			UploadProgress = 0.5f;
+			
+			// Update build detection
+			CheckForExistingBuild();
+			
+			if (bCompressOnly)
+			{
+				CompressOnly(BuildPath);
+			}
+			else
+			{
+				CompressAndUpload(BuildPath);
+			}
+		}
+		else
+		{
+			StatusMessage = FString::Printf(TEXT("Build failed with code %d. Check the Output Log for details."), ReturnCode);
+			StatusMessageType = TEXT("Error");
+			bIsBuilding = false;
+			UploadProgress = 0.0f;
+			
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Build error: %s"), *StdErr);
+		}
+	});
+}
+
+void SGLCManagerWindow::CompressOnly(const FString& BuildPath)
+{
+	StatusMessage = TEXT("Compressing build...");
+	StatusMessageType = TEXT("Info");
+	UploadProgress = 0.6f;
+	
+	FString ZipPath = GetZipPath();
+	// Use GetBuildSourcePath() to get the correct path (Windows/Mac/Linux subfolder)
+	FString ActualBuildPath = GetBuildSourcePath();
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] CompressOnly: Compressing %s to %s"), *ActualBuildPath, *ZipPath);
+	
+	// Compress in background thread
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, ActualBuildPath, ZipPath]()
+	{
+		bool bSuccess = CompressBuild(ActualBuildPath, ZipPath);
+		
+		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, ZipPath]()
+		{
+			if (bSuccess)
+			{
+				IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+				int64 ZipSize = PlatformFile.FileSize(*ZipPath);
+				
+				StatusMessage = FString::Printf(TEXT("Build compressed successfully! Size: %.2f MB"), ZipSize / (1024.0 * 1024.0));
+				StatusMessageType = TEXT("Success");
+				UploadProgress = 1.0f;
+				
+				// Update build detection
+				CheckForExistingBuild();
+			}
+			else
+			{
+				StatusMessage = TEXT("Compression failed. Check the Output Log for details.");
+				StatusMessageType = TEXT("Error");
+			}
+			
+			bIsBuilding = false;
+			UploadProgress = 0.0f;
+		});
+	});
+}
+
+void SGLCManagerWindow::CompressAndUpload(const FString& BuildPath)
+{
+	StatusMessage = TEXT("Compressing build...");
+	StatusMessageType = TEXT("Info");
+	UploadProgress = 0.6f;
+	
+	FString ZipPath = GetZipPath();
+	// Use GetBuildSourcePath() to get the correct path (Windows/Mac/Linux subfolder)
+	FString ActualBuildPath = GetBuildSourcePath();
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] CompressAndUpload: Compressing %s to %s"), *ActualBuildPath, *ZipPath);
+	
+	// Compress in background thread
+	AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, ActualBuildPath, ZipPath]()
+	{
+		bool bSuccess = CompressBuild(ActualBuildPath, ZipPath);
+		
+		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, ZipPath]()
+		{
+			if (bSuccess)
+			{
+				StatusMessage = TEXT("Compression complete. Upload functionality coming soon!");
+				StatusMessageType = TEXT("Info");
+				UploadProgress = 0.8f;
+				
+				// Update build detection
+				CheckForExistingBuild();
+				
+				// TODO: Implement upload here
+				// For now just finish
+				bIsBuilding = false;
+				UploadProgress = 0.0f;
+			}
+			else
+			{
+				StatusMessage = TEXT("Compression failed. Check the Output Log for details.");
+				StatusMessageType = TEXT("Error");
+				bIsBuilding = false;
+				UploadProgress = 0.0f;
+			}
+		});
+	});
+}
+
+bool SGLCManagerWindow::CompressBuild(const FString& SourcePath, const FString& ZipPath)
+{
+	UE_LOG(LogTemp, Log, TEXT("[GLC] CompressBuild - Source: %s"), *SourcePath);
+	UE_LOG(LogTemp, Log, TEXT("[GLC] CompressBuild - Target: %s"), *ZipPath);
+	
+	// Verify source exists
+	if (!FPaths::DirectoryExists(SourcePath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Source directory does not exist: %s"), *SourcePath);
+		return false;
+	}
+	
+	// Ensure target directory exists
+	FString ZipDirectory = FPaths::GetPath(ZipPath);
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.DirectoryExists(*ZipDirectory))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Creating directory: %s"), *ZipDirectory);
+		PlatformFile.CreateDirectoryTree(*ZipDirectory);
+	}
+	
+	// Use 7-Zip or platform-specific compression
+	FString CompressCmd;
+	FString Arguments;
+	
+#if PLATFORM_WINDOWS
+	// Try to find 7-Zip
+	FString SevenZipPath = TEXT("C:/Program Files/7-Zip/7z.exe");
+	if (!FPaths::FileExists(SevenZipPath))
+	{
+		SevenZipPath = TEXT("C:/Program Files (x86)/7-Zip/7z.exe");
+	}
+	
+	if (FPaths::FileExists(SevenZipPath))
+	{
+		CompressCmd = SevenZipPath;
+		Arguments = FString::Printf(TEXT("a -tzip \"%s\" \"%s\\*\""), *ZipPath, *SourcePath);
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Using 7-Zip: %s %s"), *CompressCmd, *Arguments);
+	}
+	else
+	{
+		// Fallback to PowerShell - normalize paths to forward slashes
+		FString NormalizedSourcePath = SourcePath.Replace(TEXT("\\"), TEXT("/"));
+		FString NormalizedZipPath = ZipPath.Replace(TEXT("\\"), TEXT("/"));
+		CompressCmd = TEXT("powershell.exe");
+		Arguments = FString::Printf(TEXT("-Command \"Compress-Archive -Path '%s/*' -DestinationPath '%s' -Force\""), *NormalizedSourcePath, *NormalizedZipPath);
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Using PowerShell: %s %s"), *CompressCmd, *Arguments);
+	}
+#elif PLATFORM_MAC || PLATFORM_LINUX
+	CompressCmd = TEXT("/usr/bin/zip");
+	Arguments = FString::Printf(TEXT("-r \"%s\" \"%s\""), *ZipPath, *SourcePath);
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Using zip: %s %s"), *CompressCmd, *Arguments);
+#endif
+	
+	int32 ReturnCode = 0;
+	FString StdOut;
+	FString StdErr;
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Executing compression command..."));
+	FPlatformProcess::ExecProcess(*CompressCmd, *Arguments, &ReturnCode, &StdOut, &StdErr);
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Compression return code: %d"), ReturnCode);
+	if (!StdOut.IsEmpty())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[GLC] StdOut: %s"), *StdOut);
+	}
+	if (!StdErr.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GLC] StdErr: %s"), *StdErr);
+	}
+	
+	if (ReturnCode != 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Compression failed with code %d"), ReturnCode);
+		return false;
+	}
+	
+	// Verify the ZIP was created
+	if (!FPaths::FileExists(ZipPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] ZIP file was not created at: %s"), *ZipPath);
+		return false;
+	}
+	
+	int64 ZipSize = PlatformFile.FileSize(*ZipPath);
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Compression successful! ZIP size: %lld bytes"), ZipSize);
+	
+	return true;
+}
+
+void SGLCManagerWindow::StartBuildStatusMonitoring(int64 BuildId)
+{
+	UE_LOG(LogTemp, Log, TEXT("[GLC] === Starting Build Status Monitor for Build #%lld ==="), BuildId);
+	
+	CurrentBuildId = BuildId;
+	bIsMonitoringBuild = true;
+	
+	// Start a timer to check status every 5 seconds
+	if (GEditor)
+	{
+		GEditor->GetTimerManager()->SetTimer(
+			BuildStatusTimerHandle,
+			FTimerDelegate::CreateSP(this, &SGLCManagerWindow::CheckBuildStatus),
+			5.0f,  // Check every 5 seconds
+			true   // Loop
+		);
+		
+		// Check immediately
+		CheckBuildStatus();
+	}
+}
+
+void SGLCManagerWindow::StopBuildStatusMonitoring()
+{
+	if (GEditor && BuildStatusTimerHandle.IsValid())
+	{
+		GEditor->GetTimerManager()->ClearTimer(BuildStatusTimerHandle);
+		BuildStatusTimerHandle.Invalidate();
+	}
+	
+	bIsMonitoringBuild = false;
+	UE_LOG(LogTemp, Log, TEXT("[GLC] === Build Status Monitor Ended ==="));
+}
+
+void SGLCManagerWindow::CheckBuildStatus()
+{
+	if (!ApiClient.IsValid() || !bIsMonitoringBuild || CurrentBuildId == 0)
+	{
+		StopBuildStatusMonitoring();
+		return;
+	}
+	
+	ApiClient->GetBuildStatusAsync(CurrentBuildId,
+		[this](bool bSuccess, FString Error, FGLCBuildStatusResponse Response)
+		{
+			if (!bSuccess)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[GLC] Failed to get build status: %s"), *Error);
+				return;
+			}
+			
+			// Update UI based on status
+			FString StatusIcon = GetStatusIcon(Response.Status);
+			StatusMessage = FString::Printf(TEXT("%s Build #%lld: %s"), *StatusIcon, Response.AppBuildId, *Response.Status);
+			
+			// Add progress information if available
+			if (Response.StageProgress > 0)
+			{
+				StatusMessage += FString::Printf(TEXT(" (%d%%)"), Response.StageProgress);
+			}
+			
+			// Check if build is in final state
+			if (Response.Status == TEXT("Completed"))
+			{
+				StatusMessage = FString::Printf(TEXT("✅ Build #%lld completed successfully!"), Response.AppBuildId);
+				StatusMessageType = TEXT("Success");
+				StopBuildStatusMonitoring();
+				
+				// Show notification
+				FText DialogTitle = FText::FromString(TEXT("Build Completed"));
+				FText DialogMessage = FText::FromString(FString::Printf(
+					TEXT("Build #%lld processed successfully!\n\nDo you want to view it in Game Launcher Cloud?"),
+					Response.AppBuildId
+				));
+				
+				EAppReturnType::Type Result = FMessageDialog::Open(EAppMsgType::YesNo, DialogMessage, DialogTitle);
+				if (Result == EAppReturnType::Yes)
+				{
+					FString FrontendUrl = ApiUrl.Replace(TEXT("api."), TEXT("app."));
+					FString BuildUrl = FString::Printf(TEXT("%s/apps/id/%lld/builds"), *FrontendUrl, Response.AppId);
+					FPlatformProcess::LaunchURL(*BuildUrl, nullptr, nullptr);
+				}
+			}
+			else if (Response.Status == TEXT("Failed"))
+			{
+				FString ErrorMsg = Response.ErrorMessage.IsEmpty() ? TEXT("Unknown error") : Response.ErrorMessage;
+				StatusMessage = FString::Printf(TEXT("❌ Build #%lld failed: %s"), Response.AppBuildId, *ErrorMsg);
+				StatusMessageType = TEXT("Error");
+				StopBuildStatusMonitoring();
+				
+				// Show error dialog
+				FText DialogTitle = FText::FromString(TEXT("Build Failed"));
+				FText DialogMessage = FText::FromString(FString::Printf(
+					TEXT("Build #%lld processing failed:\n\n%s"),
+					Response.AppBuildId,
+					*ErrorMsg
+				));
+				FMessageDialog::Open(EAppMsgType::Ok, DialogMessage, DialogTitle);
+			}
+			else if (Response.Status == TEXT("Cancelled") || Response.Status == TEXT("Deleted"))
+			{
+				StatusMessage = FString::Printf(TEXT("⚠️ Build #%lld was %s"), Response.AppBuildId, *Response.Status.ToLower());
+				StatusMessageType = TEXT("Warning");
+				StopBuildStatusMonitoring();
+			}
+			else
+			{
+				// Still processing
+				StatusMessageType = TEXT("Info");
+			}
+		});
+}
+
+FString SGLCManagerWindow::GetStatusIcon(const FString& Status)
+{
+	if (Status == TEXT("Pending")) return TEXT("⏳");
+	if (Status == TEXT("GeneratingPresignedUrl")) return TEXT("🔗");
+	if (Status == TEXT("UploadingBuild")) return TEXT("⬆️");
+	if (Status == TEXT("Enqueued")) return TEXT("📋");
+	if (Status == TEXT("DownloadingBuild")) return TEXT("⬇️");
+	if (Status == TEXT("DownloadingPreviousBuild")) return TEXT("⬇️");
+	if (Status == TEXT("UnzippingBuild")) return TEXT("📦");
+	if (Status == TEXT("UnzippingPreviousBuild")) return TEXT("📦");
+	if (Status == TEXT("CreatingPatch")) return TEXT("🔧");
+	if (Status == TEXT("DeployingPatch")) return TEXT("🚀");
+	if (Status == TEXT("Completed")) return TEXT("✅");
+	if (Status == TEXT("Failed")) return TEXT("❌");
+	if (Status == TEXT("Cancelled")) return TEXT("⚠️");
+	if (Status == TEXT("Deleted")) return TEXT("🗑️");
+	
+	return TEXT("📊");
+}
+
+void SGLCManagerWindow::UploadBuildToCloud(const FString& ZipPath)
+{
+	UE_LOG(LogTemp, Log, TEXT("[GLC] UploadBuildToCloud called with: %s"), *ZipPath);
+	
+	if (!ApiClient.IsValid() || !bIsAuthenticated)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Not authenticated or ApiClient invalid"));
+		StatusMessage = TEXT("Not authenticated");
+		StatusMessageType = TEXT("Error");
+		bIsUploading = false;
+		return;
+	}
+	
+	if (SelectedAppIndex < 0 || !AvailableApps.IsValidIndex(SelectedAppIndex))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Invalid app selection. Index: %d, Apps count: %d"), SelectedAppIndex, AvailableApps.Num());
+		StatusMessage = TEXT("Please select an app");
+		StatusMessageType = TEXT("Error");
+		bIsUploading = false;
+		return;
+	}
+	
+	// Verify file exists
+	if (!FPaths::FileExists(ZipPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Build file does not exist: %s"), *ZipPath);
+		StatusMessage = TEXT("Build file not found");
+		StatusMessageType = TEXT("Error");
+		bIsUploading = false;
+		return;
+	}
+	
+	// Get file size
+	int64 FileSize = IFileManager::Get().FileSize(*ZipPath);
+	if (FileSize <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Invalid build file size: %lld for file: %s"), FileSize, *ZipPath);
+		
+		// Try alternative method using IPlatformFile
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+		FileSize = PlatformFile.FileSize(*ZipPath);
+		
+		if (FileSize <= 0)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Alternative method also failed. File may be corrupted."));
+			StatusMessage = TEXT("Invalid build file. Please rebuild.");
+			StatusMessageType = TEXT("Error");
+			bIsUploading = false;
+			return;
+		}
+		
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Alternative method succeeded. File size: %lld"), FileSize);
+	}
+	
+	FGLCAppInfo SelectedAppInfo = AvailableApps[SelectedAppIndex];
+	FString FileName = FPaths::GetCleanFilename(ZipPath);
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Starting upload - App: %s, File: %s, Size: %lld bytes"), *SelectedAppInfo.Name, *FileName, FileSize);
+	
+	// Update UI on game thread
+	AsyncTask(ENamedThreads::GameThread, [this]()
+	{
+		StatusMessage = TEXT("Checking upload limits...");
+		StatusMessageType = TEXT("Info");
+		UploadProgress = 0.1f;
+		if (StatusMessageText.IsValid())
+		{
+			StatusMessageText->SetText(FText::FromString(StatusMessage));
+		}
+	});
+	
+	// Step 1: Check if upload is allowed
+	ApiClient->CanUploadAsync(FileSize, UncompressedBuildSize, SelectedAppInfo.Id, 
+		[this, SelectedAppInfo, FileName, FileSize, ZipPath](bool bSuccess, FString Error, FGLCCanUploadResponse Response)
+		{
+			if (!bSuccess)
+			{
+				AsyncTask(ENamedThreads::GameThread, [this, Error]()
+				{
+					StatusMessage = FString::Printf(TEXT("Upload check failed: %s"), *Error);
+					StatusMessageType = TEXT("Error");
+					bIsUploading = false;
+					UploadProgress = 0.0f;
+					if (StatusMessageText.IsValid())
+					{
+						StatusMessageText->SetText(FText::FromString(StatusMessage));
+					}
+				});
+				return;
+			}
+			
+			if (!Response.CanUpload)
+			{
+				AsyncTask(ENamedThreads::GameThread, [this]()
+				{
+					StatusMessage = TEXT("Cannot upload. Check your plan limits.");
+					StatusMessageType = TEXT("Error");
+					bIsUploading = false;
+					UploadProgress = 0.0f;
+					if (StatusMessageText.IsValid())
+					{
+						StatusMessageText->SetText(FText::FromString(StatusMessage));
+					}
+				});
+				return;
+			}
+			
+			AsyncTask(ENamedThreads::GameThread, [this]()
+			{
+				StatusMessage = TEXT("Starting upload...");
+				UploadProgress = 0.2f;
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
+			});
+			
+			// Use default build notes if empty
+			FString Notes = BuildNotesInput.IsEmpty() ? TEXT("Uploaded from Unreal Engine Extension") : BuildNotesInput;
+			
+			// Step 2: Start upload and get presigned URL
+			ApiClient->StartUploadAsync(SelectedAppInfo.Id, FileName, FileSize, UncompressedBuildSize, Notes,
+				[this, ZipPath, FileSize](bool bSuccess, FString Error, FGLCStartUploadResponse Response)
+				{
+				if (!bSuccess)
+				{
+					AsyncTask(ENamedThreads::GameThread, [this, Error]()
+					{
+						StatusMessage = FString::Printf(TEXT("Failed to start upload: %s"), *Error);
+						StatusMessageType = TEXT("Error");
+						bIsUploading = false;
+						UploadProgress = 0.0f;
+						if (StatusMessageText.IsValid())
+						{
+							StatusMessageText->SetText(FText::FromString(StatusMessage));
+						}
+					});
+					return;
+				}
+				
+				AsyncTask(ENamedThreads::GameThread, [this]()
+				{
+					StatusMessage = TEXT("Uploading file to cloud...");
+					UploadProgress = 0.3f;
+					if (StatusMessageText.IsValid())
+					{
+						StatusMessageText->SetText(FText::FromString(StatusMessage));
+					}
+				});
+				CurrentBuildId = Response.AppBuildId;					// Track if we've already notified (since callback is called multiple times)
+					static bool bHasNotified = false;
+					bHasNotified = false;
+					
+					// Step 3: Upload file to cloud storage
+					ApiClient->UploadFileAsync(Response.UploadUrl, ZipPath,
+						[this, Response, FileSize](bool bSuccess, FString Error, float Progress)
+						{
+							// Check if this is a real error (not just a progress update)
+							if (!bSuccess && Progress >= 1.0f)
+							{
+								// Only treat as error if upload is complete but failed
+								AsyncTask(ENamedThreads::GameThread, [this, Error]()
+								{
+									StatusMessage = FString::Printf(TEXT("Upload failed: %s"), *Error);
+									StatusMessageType = TEXT("Error");
+									bIsUploading = false;
+									UploadProgress = 0.0f;
+									if (StatusMessageText.IsValid())
+									{
+										StatusMessageText->SetText(FText::FromString(StatusMessage));
+									}
+								});
+								return;
+							}
+							
+							// Update progress (30% to 90%)
+							UploadProgress = 0.3f + (Progress * 0.6f);
+							
+							// Show progress with percentage and size
+							int32 Percentage = FMath::RoundToInt(Progress * 100.0f);
+							float SizeMB = FileSize / (1024.0f * 1024.0f);
+							StatusMessage = FString::Printf(TEXT("Uploading to cloud storage (%d%% of %.2f MB)..."), Percentage, SizeMB);
+							
+							// Update UI on game thread
+							AsyncTask(ENamedThreads::GameThread, [this]()
+							{
+								if (StatusMessageText.IsValid())
+								{
+									StatusMessageText->SetText(FText::FromString(StatusMessage));
+								}
+							});
+							
+							if (bSuccess && Progress >= 1.0f && !bHasNotified)
+							{
+								bHasNotified = true;
+								AsyncTask(ENamedThreads::GameThread, [this]()
+								{
+									StatusMessage = TEXT("Finalizing upload...");
+									UploadProgress = 0.95f;
+									if (StatusMessageText.IsValid())
+									{
+										StatusMessageText->SetText(FText::FromString(StatusMessage));
+									}
+								});
+								
+								// Step 4: Notify backend that file is ready
+								ApiClient->NotifyFileReadyAsync(Response.AppBuildId, Response.Key,
+									[this](bool bSuccess, FString Error)
+									{
+										if (!bSuccess)
+										{
+											AsyncTask(ENamedThreads::GameThread, [this, Error]()
+											{
+												StatusMessage = FString::Printf(TEXT("Failed to finalize upload: %s"), *Error);
+												StatusMessageType = TEXT("Error");
+												bIsUploading = false;
+												UploadProgress = 0.0f;
+												if (StatusMessageText.IsValid())
+												{
+													StatusMessageText->SetText(FText::FromString(StatusMessage));
+												}
+											});
+											return;
+										}
+										
+										AsyncTask(ENamedThreads::GameThread, [this]()
+										{
+											StatusMessage = TEXT("Upload completed! Your build is now processing.");
+											StatusMessageType = TEXT("Success");
+											bIsUploading = false;
+											UploadProgress = 1.0f;
+											if (StatusMessageText.IsValid())
+											{
+												StatusMessageText->SetText(FText::FromString(StatusMessage));
+											}
+										});
+										
+										// Start monitoring build status
+										StartBuildStatusMonitoring(CurrentBuildId);
+									});
+							}
+						});
+				});
+		});
 }
 
 #undef LOCTEXT_NAMESPACE

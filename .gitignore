@@ -11,6 +11,9 @@ Build/
 *.VC.db
 *.VC.opendb
 
+# Game Launcher Cloud
+GLC_Upload/
+
 # Visual Studio
 .vs/
 .vscode/

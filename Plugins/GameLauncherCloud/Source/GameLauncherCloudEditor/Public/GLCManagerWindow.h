@@ -42,10 +42,15 @@ private:
 	void LoadConfig();
 	FString GetBuildDirectory() const;
 	void PackageProject(const FString& OutputDirectory);
-	void CompressBuild(const FString& BuildDirectory, const FString& ZipPath);
 	int64 GetDirectorySize(const FString& DirectoryPath);
 	void StartBuildStatusMonitoring(int64 BuildId);
 	void StopBuildStatusMonitoring();
+	void CheckBuildStatus();
+	FString GetStatusIcon(const FString& Status);
+	
+	// Path helpers
+	FString GetBuildSourcePath() const;
+	FString GetZipPath() const;
 	
 	// ========== STATE ========== //
 	TSharedPtr<FGLCApiClient> ApiClient;
@@ -74,6 +79,15 @@ private:
 	FString StatusMessageType; // "Info", "Warning", "Error", "Success"
 	float UploadProgress;
 	
+	// ========== BUILD DETECTION ========== //
+	bool bHasBuildReady;
+	FDateTime LastBuildDate;
+	FString LastBuildPath;
+	int64 LastBuildSize;
+	int64 UncompressedBuildSize;
+	int32 TotalFileCount;
+	bool bIsCompressed;
+	
 	int64 CurrentBuildId;
 	FTimerHandle BuildStatusTimerHandle;
 	
@@ -87,4 +101,22 @@ private:
 	
 	// ========== UI REFRESH ========== //
 	void RefreshUI();
+	
+	// ========== BUILD DETECTION ========== //
+	void CheckForExistingBuild();
+	
+	// ========== ACTIONS ========== //
+	FReply OnBuildOnlyClicked();
+	FReply OnUploadOnlyClicked();
+	FReply OnDashboardClicked();
+	FReply OnManageAppClicked();
+	
+	// ========== BUILD METHODS ========== //
+	void BuildGame(bool bCompressOnly = false);
+	void CompressOnly(const FString& BuildPath);
+	void CompressAndUpload(const FString& BuildPath);
+	bool CompressBuild(const FString& SourcePath, const FString& ZipPath);
+	
+	// ========== UPLOAD METHODS ========== //
+	void UploadBuildToCloud(const FString& ZipPath);
 };
