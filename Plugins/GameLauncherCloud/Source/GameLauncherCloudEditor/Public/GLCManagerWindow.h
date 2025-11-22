@@ -110,6 +110,7 @@ private:
 	FReply OnUploadOnlyClicked();
 	FReply OnDashboardClicked();
 	FReply OnManageAppClicked();
+	FReply OnCancelUploadClicked();
 	
 	// ========== BUILD METHODS ========== //
 	void BuildGame(bool bCompressOnly = false);

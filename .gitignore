@@ -13,6 +13,7 @@ Build/
 
 # Game Launcher Cloud
 GLC_Upload/
+Builds/
 
 # Visual Studio
 .vs/

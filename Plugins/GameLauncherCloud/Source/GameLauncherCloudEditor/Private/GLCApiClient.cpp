@@ -395,6 +395,10 @@ void FGLCApiClient::UploadFileAsync(const FString& PresignedUrl, const FString& 
 	UE_LOG(LogTemp, Log, TEXT("[GLC] File size: %lld bytes (%.2f MB)"), FileSize, FileSize / (1024.0f * 1024.0f));
 	
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	
+	// Store the request so it can be cancelled
+	ActiveUploadRequest = Request;
+	
 	Request->SetURL(PresignedUrl);
 	Request->SetVerb(TEXT("PUT"));
 	Request->SetHeader(TEXT("Content-Type"), TEXT("application/octet-stream"));
@@ -409,6 +413,18 @@ void FGLCApiClient::UploadFileAsync(const FString& PresignedUrl, const FString& 
 	
 	Request->OnProcessRequestComplete().BindLambda([this, ProgressCallback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
 	{
+		// Clear the active request reference
+		ActiveUploadRequest.Reset();
+		
+		// Check if request was cancelled
+		EHttpRequestStatus::Type Status = Request->GetStatus();
+		if (!bSuccess && (!Response.IsValid() || Status == EHttpRequestStatus::Failed))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GLC] Upload was cancelled or connection failed"));
+			ProgressCallback(false, TEXT("Upload cancelled"), -1.0f);
+			return;
+		}
+		
 		if (!bSuccess || !Response.IsValid() || Response->GetResponseCode() != 200)
 		{
 			FString Error = FString::Printf(TEXT("Upload failed: HTTP %d"), Response.IsValid() ? Response->GetResponseCode() : 0);
@@ -510,7 +526,7 @@ void FGLCApiClient::GetBuildStatusAsync(int64 AppBuildId, TFunction<void(bool, F
 			ResultObject->TryGetNumberField(TEXT("compressedFileSize"), StatusResponse.CompressedFileSize);
 			ResultObject->TryGetNumberField(TEXT("stageProgress"), StatusResponse.StageProgress);
 			
-			Callback(true, TEXT("Status retrieved successfully"), StatusResponse);
+			Callback(true, TEXT("Success"), StatusResponse);
 		}
 		else
 		{
@@ -520,4 +536,77 @@ void FGLCApiClient::GetBuildStatusAsync(int64 AppBuildId, TFunction<void(bool, F
 	});
 	
 	Request->ProcessRequest();
+}
+
+void FGLCApiClient::CancelBuildAsync(int64 AppBuildId, TFunction<void(bool, FString)> Callback)
+{
+	if (AuthToken.IsEmpty())
+	{
+		Callback(false, TEXT("Not authenticated"));
+		return;
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] CancelBuild started for Build ID: %lld"), AppBuildId);
+	
+	FString Url = FString::Printf(TEXT("%s/api/AppBuild/cancelByBuildId/%lld"), *BaseUrl, AppBuildId);
+	
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Authorization"), TEXT("Bearer ") + AuthToken);
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	
+	Request->OnProcessRequestComplete().BindLambda([this, Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
+	{
+		if (!bSuccess || !Response.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[GLC] CancelBuild request failed: No response"));
+			Callback(false, TEXT("Connection error"));
+			return;
+		}
+		
+		int32 ResponseCode = Response->GetResponseCode();
+		FString ResponseString = Response->GetContentAsString();
+		
+		if (ResponseCode == 200)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[GLC] Build cancelled successfully"));
+			Callback(true, TEXT("Build cancelled successfully"));
+		}
+		else
+		{
+			FString ErrorMessage = FString::Printf(TEXT("Failed to cancel build: HTTP %d"), ResponseCode);
+			
+			// Try to extract error message from response
+			TSharedPtr<FJsonObject> JsonObject = ParseJsonResponse(ResponseString);
+			if (JsonObject.IsValid())
+			{
+				const TArray<TSharedPtr<FJsonValue>>* ErrorMessages;
+				if (JsonObject->TryGetArrayField(TEXT("errorMessages"), ErrorMessages) && ErrorMessages->Num() > 0)
+				{
+					ErrorMessage = (*ErrorMessages)[0]->AsString();
+				}
+			}
+			
+			UE_LOG(LogTemp, Error, TEXT("[GLC] CancelBuild failed: %s"), *ErrorMessage);
+			Callback(false, ErrorMessage);
+		}
+	});
+	
+	Request->ProcessRequest();
+}
+
+void FGLCApiClient::CancelActiveUpload()
+{
+	if (ActiveUploadRequest.IsValid())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Cancelling active upload request"));
+		ActiveUploadRequest->CancelRequest();
+		ActiveUploadRequest.Reset();
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Active upload request cancelled"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GLC] No active upload request to cancel"));
+	}
 }

@@ -691,6 +691,74 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 				]
 			]
 			
+			// Cancel upload button
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 10.0f)
+			.HAlign(HAlign_Center)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "FlatButton.Danger")
+				.ForegroundColor(FLinearColor::White)
+				.ContentPadding(FMargin(30.0f, 10.0f))
+				.OnClicked(this, &SGLCManagerWindow::OnCancelUploadClicked)
+				.Visibility_Lambda([this]() { 
+					return (bIsUploading || bIsMonitoringBuild) && CurrentBuildId > 0 ? EVisibility::Visible : EVisibility::Collapsed; 
+				})
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("CancelUpload", "❌ Cancel Upload"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+				]
+			]
+			
+			// Build status monitoring section
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 15.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.2f, 0.3f, 0.4f, 0.85f))
+				.Padding(FMargin(20.0f, 15.0f))
+				.Visibility_Lambda([this]() { return bIsMonitoringBuild ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+					SNew(SVerticalBox)
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("MonitoringTitle", "📊 Build Processing Status"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+						.ColorAndOpacity(FLinearColor(0.9f, 0.95f, 1.0f))
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							return FText::Format(LOCTEXT("MonitoringBuild", "Monitoring Build #{0}..."), FText::AsNumber(CurrentBuildId));
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+						.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 5.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("MonitoringInfo", "Your build is being processed on our servers. This window will update automatically."))
+						.Font(FCoreStyle::GetDefaultFontStyle("Italic", 11))
+						.ColorAndOpacity(FLinearColor(0.7f, 0.8f, 0.9f))
+						.AutoWrapText(true)
+					]
+				]
+			]
+			
 			// Loading apps message (only when loading apps)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -902,43 +970,58 @@ FReply SGLCManagerWindow::OnLoadAppsClicked()
 	StatusMessage = TEXT("Loading apps...");
 	StatusMessageType = TEXT("Info");
 	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Loading apps..."));
+	
 	ApiClient->GetAppListAsync([this](bool bSuccess, FString Message, TArray<FGLCAppInfo> Apps)
 	{
-		bIsLoadingApps = false;
-		
-		if (bSuccess)
+		// Execute on game thread to update UI properly
+		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, Message, Apps]()
 		{
-			AvailableApps = Apps;
-			AppNames.Empty();
+			bIsLoadingApps = false;
 			
-			for (const FGLCAppInfo& App : Apps)
+			if (bSuccess)
 			{
-				AppNames.Add(MakeShareable(new FString(App.Name)));
-			}
-			
-			if (Apps.Num() > 0)
-			{
-				SelectedApp = AppNames[0];
-				SelectedAppIndex = 0;
-				StatusMessage = FString::Printf(TEXT("Loaded %d apps successfully"), Apps.Num());
-				StatusMessageType = TEXT("Success");
+				AvailableApps = Apps;
+				AppNames.Empty();
+				
+				for (const FGLCAppInfo& App : Apps)
+				{
+					AppNames.Add(MakeShareable(new FString(App.Name)));
+				}
+				
+				if (Apps.Num() > 0)
+				{
+					SelectedApp = AppNames[0];
+					SelectedAppIndex = 0;
+					StatusMessage = FString::Printf(TEXT("✓ Loaded %d apps successfully"), Apps.Num());
+					StatusMessageType = TEXT("Success");
+					UE_LOG(LogTemp, Log, TEXT("[GLC] Successfully loaded %d apps"), Apps.Num());
+				}
+				else
+				{
+					StatusMessage = TEXT("No apps found. Create an app in the Game Launcher Cloud dashboard first.");
+					StatusMessageType = TEXT("Warning");
+					UE_LOG(LogTemp, Warning, TEXT("[GLC] No apps found"));
+				}
+				
+				if (AppComboBox.IsValid())
+				{
+					AppComboBox->RefreshOptions();
+				}
 			}
 			else
 			{
-				StatusMessage = TEXT("No apps found. Create an app in the Game Launcher Cloud dashboard first.");
-				StatusMessageType = TEXT("Warning");
+				StatusMessage = FString::Printf(TEXT("Failed to load apps: %s"), *Message);
+				StatusMessageType = TEXT("Error");
+				UE_LOG(LogTemp, Error, TEXT("[GLC] Failed to load apps: %s"), *Message);
 			}
 			
-			if (AppComboBox.IsValid())
+			// Force UI refresh
+			if (StatusMessageText.IsValid())
 			{
-				AppComboBox->RefreshOptions();
+				StatusMessageText->SetText(FText::FromString(StatusMessage));
 			}
-		}
-		else
-		{
-			StatusMessage = Message;
-			StatusMessageType = TEXT("Error");
-		}
+		});
 	});
 	
 	return FReply::Handled();
@@ -1294,6 +1377,68 @@ FReply SGLCManagerWindow::OnUploadOnlyClicked()
 	return FReply::Handled();
 }
 
+FReply SGLCManagerWindow::OnCancelUploadClicked()
+{
+	if (CurrentBuildId <= 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GLC] No active build to cancel"));
+		return FReply::Handled();
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Cancelling build #%lld"), CurrentBuildId);
+	
+	// Show confirmation dialog
+	EAppReturnType::Type Result = FMessageDialog::Open(
+		EAppMsgType::YesNo, 
+		FText::FromString(FString::Printf(TEXT("Are you sure you want to cancel Build #%lld?\n\nThis action cannot be undone."), CurrentBuildId)),
+		FText::FromString(TEXT("Cancel Build"))
+	);
+	
+	if (Result != EAppReturnType::Yes)
+	{
+		return FReply::Handled();
+	}
+	
+	StatusMessage = TEXT("Cancelling build and upload...");
+	StatusMessageType = TEXT("Info");
+	
+	// First, cancel the active HTTP upload if any
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Cancelling active HTTP upload"));
+	ApiClient->CancelActiveUpload();
+	
+	// Then call API to cancel build on server
+	ApiClient->CancelBuildAsync(CurrentBuildId, [this](bool bSuccess, FString Message)
+	{
+		AsyncTask(ENamedThreads::GameThread, [this, bSuccess, Message]()
+		{
+			if (bSuccess)
+			{
+				StatusMessage = FString::Printf(TEXT("✓ Build #%lld cancelled successfully"), CurrentBuildId);
+				StatusMessageType = TEXT("Success");
+				
+				// Stop monitoring
+				StopBuildStatusMonitoring();
+				
+				// Reset states
+				bIsUploading = false;
+				bIsMonitoringBuild = false;
+				UploadProgress = 0.0f;
+				CurrentBuildId = 0;
+				
+				UE_LOG(LogTemp, Log, TEXT("[GLC] Build cancelled successfully"));
+			}
+			else
+			{
+				StatusMessage = FString::Printf(TEXT("Failed to cancel build: %s"), *Message);
+				StatusMessageType = TEXT("Error");
+				UE_LOG(LogTemp, Error, TEXT("[GLC] Failed to cancel build: %s"), *Message);
+			}
+		});
+	});
+	
+	return FReply::Handled();
+}
+
 FReply SGLCManagerWindow::OnDashboardClicked()
 {
 	FString DashboardUrl = TEXT("https://app.gamelauncher.cloud/dashboard");
@@ -1396,9 +1541,9 @@ void SGLCManagerWindow::BuildGame(bool bCompressOnly)
 
 void SGLCManagerWindow::CompressOnly(const FString& BuildPath)
 {
-	StatusMessage = TEXT("Compressing build...");
+	StatusMessage = TEXT("Starting compression...");
 	StatusMessageType = TEXT("Info");
-	UploadProgress = 0.6f;
+	UploadProgress = 0.1f;
 	
 	FString ZipPath = GetZipPath();
 	// Use GetBuildSourcePath() to get the correct path (Windows/Mac/Linux subfolder)
@@ -1418,17 +1563,27 @@ void SGLCManagerWindow::CompressOnly(const FString& BuildPath)
 				IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 				int64 ZipSize = PlatformFile.FileSize(*ZipPath);
 				
-				StatusMessage = FString::Printf(TEXT("Build compressed successfully! Size: %.2f MB"), ZipSize / (1024.0 * 1024.0));
+				StatusMessage = FString::Printf(TEXT("✓ Build compressed successfully! Size: %.2f MB"), ZipSize / (1024.0 * 1024.0));
 				StatusMessageType = TEXT("Success");
 				UploadProgress = 1.0f;
+				
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
 				
 				// Update build detection
 				CheckForExistingBuild();
 			}
 			else
 			{
-				StatusMessage = TEXT("Compression failed. Check the Output Log for details.");
+				StatusMessage = TEXT("❌ Compression failed. Check the Output Log for details.");
 				StatusMessageType = TEXT("Error");
+				
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
 			}
 			
 			bIsBuilding = false;
@@ -1439,9 +1594,9 @@ void SGLCManagerWindow::CompressOnly(const FString& BuildPath)
 
 void SGLCManagerWindow::CompressAndUpload(const FString& BuildPath)
 {
-	StatusMessage = TEXT("Compressing build...");
+	StatusMessage = TEXT("Starting compression...");
 	StatusMessageType = TEXT("Info");
-	UploadProgress = 0.6f;
+	UploadProgress = 0.1f;
 	
 	FString ZipPath = GetZipPath();
 	// Use GetBuildSourcePath() to get the correct path (Windows/Mac/Linux subfolder)
@@ -1458,9 +1613,14 @@ void SGLCManagerWindow::CompressAndUpload(const FString& BuildPath)
 		{
 			if (bSuccess)
 			{
-				StatusMessage = TEXT("Compression complete. Upload functionality coming soon!");
+				StatusMessage = TEXT("✓ Compression complete. Upload functionality coming soon!");
 				StatusMessageType = TEXT("Info");
 				UploadProgress = 0.8f;
+				
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
 				
 				// Update build detection
 				CheckForExistingBuild();
@@ -1472,10 +1632,15 @@ void SGLCManagerWindow::CompressAndUpload(const FString& BuildPath)
 			}
 			else
 			{
-				StatusMessage = TEXT("Compression failed. Check the Output Log for details.");
+				StatusMessage = TEXT("❌ Compression failed. Check the Output Log for details.");
 				StatusMessageType = TEXT("Error");
 				bIsBuilding = false;
 				UploadProgress = 0.0f;
+				
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
 			}
 		});
 	});
@@ -1493,13 +1658,46 @@ bool SGLCManagerWindow::CompressBuild(const FString& SourcePath, const FString& 
 		return false;
 	}
 	
+	// Count total files first for progress tracking
+	TArray<FString> AllFiles;
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	PlatformFile.FindFilesRecursively(AllFiles, *SourcePath, nullptr);
+	int32 TotalFiles = AllFiles.Num();
+	int64 TotalSize = 0;
+	
+	for (const FString& File : AllFiles)
+	{
+		TotalSize += PlatformFile.FileSize(*File);
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Found %d files to compress (%.2f MB total)"), TotalFiles, TotalSize / (1024.0 * 1024.0));
+	
+	// Update UI with file count
+	AsyncTask(ENamedThreads::GameThread, [this, TotalFiles, TotalSize]()
+	{
+		StatusMessage = FString::Printf(TEXT("Preparing to compress %d files (%.2f MB)..."), TotalFiles, TotalSize / (1024.0 * 1024.0));
+		UploadProgress = 0.05f;
+		if (StatusMessageText.IsValid())
+		{
+			StatusMessageText->SetText(FText::FromString(StatusMessage));
+		}
+	});
+	
+	FPlatformProcess::Sleep(0.5f); // Give UI time to update
+	
 	// Ensure target directory exists
 	FString ZipDirectory = FPaths::GetPath(ZipPath);
-	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 	if (!PlatformFile.DirectoryExists(*ZipDirectory))
 	{
 		UE_LOG(LogTemp, Log, TEXT("[GLC] Creating directory: %s"), *ZipDirectory);
 		PlatformFile.CreateDirectoryTree(*ZipDirectory);
+	}
+	
+	// Delete existing zip if exists
+	if (FPaths::FileExists(ZipPath))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Deleting existing ZIP file"));
+		PlatformFile.DeleteFile(*ZipPath);
 	}
 	
 	// Use 7-Zip or platform-specific compression
@@ -1522,12 +1720,96 @@ bool SGLCManagerWindow::CompressBuild(const FString& SourcePath, const FString& 
 	}
 	else
 	{
-		// Fallback to PowerShell - normalize paths to forward slashes
-		FString NormalizedSourcePath = SourcePath.Replace(TEXT("\\"), TEXT("/"));
-		FString NormalizedZipPath = ZipPath.Replace(TEXT("\\"), TEXT("/"));
+		// Fallback to PowerShell - create a temp script file with progress reporting
 		CompressCmd = TEXT("powershell.exe");
-		Arguments = FString::Printf(TEXT("-Command \"Compress-Archive -Path '%s/*' -DestinationPath '%s' -Force\""), *NormalizedSourcePath, *NormalizedZipPath);
-		UE_LOG(LogTemp, Log, TEXT("[GLC] Using PowerShell: %s %s"), *CompressCmd, *Arguments);
+		
+		// Convert forward slashes to backslashes for Windows PowerShell
+		FString WindowsSourcePath = SourcePath.Replace(TEXT("/"), TEXT("\\"));
+		FString WindowsZipPath = ZipPath.Replace(TEXT("/"), TEXT("\\"));
+		
+		// Create progress file path
+		FString ProgressFilePath = FPaths::ProjectIntermediateDir() / TEXT("compress_progress.txt");
+		FString WindowsProgressPath = ProgressFilePath.Replace(TEXT("/"), TEXT("\\"));
+		
+		// Create a temporary PowerShell script file with progress reporting
+		FString ScriptPath = FPaths::ProjectIntermediateDir() / TEXT("compress_build.ps1");
+		FString ScriptContent = FString::Printf(
+			TEXT("$ErrorActionPreference = 'Stop'\n")
+			TEXT("$progressFile = '%s'\n")
+			TEXT("$sourcePath = '%s'\n")
+			TEXT("$zipPath = '%s'\n")
+			TEXT("\n")
+			TEXT("try {\n")
+			TEXT("    # Delete old progress file\n")
+			TEXT("    if (Test-Path $progressFile) { Remove-Item $progressFile -Force }\n")
+			TEXT("    \n")
+			TEXT("    # Get all files to compress\n")
+			TEXT("    Write-Host 'Counting files...'\n")
+			TEXT("    $files = Get-ChildItem -Path $sourcePath -Recurse -File\n")
+			TEXT("    $totalFiles = $files.Count\n")
+			TEXT("    $processedFiles = 0\n")
+			TEXT("    \n")
+			TEXT("    Write-Host \"Found $totalFiles files to compress\"\n")
+			TEXT("    \"0|$totalFiles\" | Out-File -FilePath $progressFile -Encoding ASCII\n")
+			TEXT("    \n")
+			TEXT("    # Load compression assembly\n")
+			TEXT("    Add-Type -Assembly System.IO.Compression\n")
+			TEXT("    Add-Type -Assembly System.IO.Compression.FileSystem\n")
+			TEXT("    \n")
+			TEXT("    # Create ZIP file stream\n")
+			TEXT("    $zipStream = [System.IO.File]::Create($zipPath)\n")
+			TEXT("    $archive = [System.IO.Compression.ZipArchive]::new($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)\n")
+			TEXT("    \n")
+			TEXT("    try {\n")
+			TEXT("        foreach ($file in $files) {\n")
+			TEXT("            $relativePath = $file.FullName.Substring($sourcePath.Length + 1)\n")
+			TEXT("            $entry = $archive.CreateEntry($relativePath, [System.IO.Compression.CompressionLevel]::Optimal)\n")
+			TEXT("            $entryStream = $entry.Open()\n")
+			TEXT("            try {\n")
+			TEXT("                $fileStream = [System.IO.File]::OpenRead($file.FullName)\n")
+			TEXT("                try {\n")
+			TEXT("                    $fileStream.CopyTo($entryStream)\n")
+			TEXT("                } finally {\n")
+			TEXT("                    $fileStream.Close()\n")
+			TEXT("                }\n")
+			TEXT("            } finally {\n")
+			TEXT("                $entryStream.Close()\n")
+			TEXT("            }\n")
+			TEXT("            \n")
+			TEXT("            $processedFiles++\n")
+			TEXT("            if ($processedFiles %% 10 -eq 0 -or $processedFiles -eq $totalFiles) {\n")
+			TEXT("                \"$processedFiles|$totalFiles\" | Out-File -FilePath $progressFile -Encoding ASCII -Force\n")
+			TEXT("            }\n")
+			TEXT("        }\n")
+			TEXT("    } finally {\n")
+			TEXT("        $archive.Dispose()\n")
+			TEXT("        $zipStream.Close()\n")
+			TEXT("    }\n")
+			TEXT("    \n")
+			TEXT("    Write-Host 'Compression completed successfully'\n")
+			TEXT("    \"$totalFiles|$totalFiles|COMPLETE\" | Out-File -FilePath $progressFile -Encoding ASCII -Force\n")
+			TEXT("    exit 0\n")
+			TEXT("} catch {\n")
+			TEXT("    $errorMsg = $_.Exception.Message\n")
+			TEXT("    Write-Host \"Error: $errorMsg\"\n")
+			TEXT("    Write-Host $_.ScriptStackTrace\n")
+			TEXT("    \"ERROR|$errorMsg\" | Out-File -FilePath $progressFile -Encoding ASCII -Force\n")
+			TEXT("    exit 1\n")
+			TEXT("}"),
+			*WindowsProgressPath, *WindowsSourcePath, *WindowsZipPath);
+		
+		if (!FFileHelper::SaveStringToFile(ScriptContent, *ScriptPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Failed to create PowerShell script"));
+			return false;
+		}
+		
+		Arguments = FString::Printf(
+			TEXT("-NoProfile -ExecutionPolicy Bypass -File \"%s\""),
+			*ScriptPath);
+		
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Using PowerShell script: %s"), *ScriptPath);
+		UE_LOG(LogTemp, Log, TEXT("[GLC] Progress file: %s"), *ProgressFilePath);
 	}
 #elif PLATFORM_MAC || PLATFORM_LINUX
 	CompressCmd = TEXT("/usr/bin/zip");
@@ -1540,23 +1822,123 @@ bool SGLCManagerWindow::CompressBuild(const FString& SourcePath, const FString& 
 	FString StdErr;
 	
 	UE_LOG(LogTemp, Log, TEXT("[GLC] Executing compression command..."));
-	FPlatformProcess::ExecProcess(*CompressCmd, *Arguments, &ReturnCode, &StdOut, &StdErr);
+	
+	// Use ExecProcess with proper output handling
+	bool bLaunchDetached = false;
+	bool bLaunchHidden = true;
+	bool bLaunchReallyHidden = true;
+	
+	FProcHandle ProcHandle = FPlatformProcess::CreateProc(
+		*CompressCmd,
+		*Arguments,
+		bLaunchDetached,
+		bLaunchHidden,
+		bLaunchReallyHidden,
+		nullptr,
+		0,
+		nullptr,
+		nullptr
+	);
+	
+	if (!ProcHandle.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] Failed to start compression process"));
+		return false;
+	}
+	
+	// Wait for process to complete with timeout (10 minutes for large files)
+	const double TimeoutSeconds = 600.0;
+	const double StartTime = FPlatformTime::Seconds();
+	bool bTimedOut = false;
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Waiting for compression to complete..."));
+	
+	FString ProgressFilePath = FPaths::ProjectIntermediateDir() / TEXT("compress_progress.txt");
+	int32 LastProcessedFiles = 0;
+	
+	while (FPlatformProcess::IsProcRunning(ProcHandle))
+	{
+		FPlatformProcess::Sleep(0.5f);
+		
+		double ElapsedSeconds = FPlatformTime::Seconds() - StartTime;
+		if (ElapsedSeconds > TimeoutSeconds)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[GLC] Compression timeout after %.0f seconds"), TimeoutSeconds);
+			FPlatformProcess::TerminateProc(ProcHandle);
+			bTimedOut = true;
+			break;
+		}
+		
+		// Read progress from file
+		if (FPaths::FileExists(ProgressFilePath))
+		{
+			FString ProgressContent;
+			if (FFileHelper::LoadFileToString(ProgressContent, *ProgressFilePath))
+			{
+				ProgressContent = ProgressContent.TrimStartAndEnd();
+				
+				TArray<FString> Parts;
+				ProgressContent.ParseIntoArray(Parts, TEXT("|"));
+				
+				if (Parts.Num() >= 2)
+				{
+					int32 ProcessedFiles = FCString::Atoi(*Parts[0]);
+					int32 TotalFilesInProgress = FCString::Atoi(*Parts[1]);
+					
+					if (ProcessedFiles != LastProcessedFiles)
+					{
+						LastProcessedFiles = ProcessedFiles;
+						float Progress = TotalFilesInProgress > 0 ? (float)ProcessedFiles / (float)TotalFilesInProgress : 0.0f;
+						
+						UE_LOG(LogTemp, Log, TEXT("[GLC] Compression progress: %d/%d files (%.1f%%)"), 
+							ProcessedFiles, TotalFilesInProgress, Progress * 100.0f);
+						
+						// Update UI on game thread
+						AsyncTask(ENamedThreads::GameThread, [this, ProcessedFiles, TotalFilesInProgress, Progress]()
+						{
+							StatusMessage = FString::Printf(TEXT("Compressing: %d/%d files (%.1f%%)"), 
+								ProcessedFiles, TotalFilesInProgress, Progress * 100.0f);
+							UploadProgress = 0.1f + (Progress * 0.8f); // Progress from 10% to 90%
+							if (StatusMessageText.IsValid())
+							{
+								StatusMessageText->SetText(FText::FromString(StatusMessage));
+							}
+						});
+					}
+				}
+			}
+		}
+	}
+	
+	// Get return code
+	FPlatformProcess::GetProcReturnCode(ProcHandle, &ReturnCode);
+	FPlatformProcess::CloseProc(ProcHandle);
+	
+	if (bTimedOut)
+	{
+		return false;
+	}
 	
 	UE_LOG(LogTemp, Log, TEXT("[GLC] Compression return code: %d"), ReturnCode);
-	if (!StdOut.IsEmpty())
-	{
-		UE_LOG(LogTemp, Log, TEXT("[GLC] StdOut: %s"), *StdOut);
-	}
-	if (!StdErr.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[GLC] StdErr: %s"), *StdErr);
-	}
 	
 	if (ReturnCode != 0)
 	{
+		// Try to read error from progress file
+		if (FPaths::FileExists(ProgressFilePath))
+		{
+			FString ErrorContent;
+			if (FFileHelper::LoadFileToString(ErrorContent, *ProgressFilePath))
+			{
+				UE_LOG(LogTemp, Error, TEXT("[GLC] Compression error details: %s"), *ErrorContent);
+			}
+		}
+		
 		UE_LOG(LogTemp, Error, TEXT("[GLC] Compression failed with code %d"), ReturnCode);
 		return false;
 	}
+	
+	// Wait a bit for file system to sync
+	FPlatformProcess::Sleep(1.0f);
 	
 	// Verify the ZIP was created
 	if (!FPaths::FileExists(ZipPath))
@@ -1566,7 +1948,13 @@ bool SGLCManagerWindow::CompressBuild(const FString& SourcePath, const FString& 
 	}
 	
 	int64 ZipSize = PlatformFile.FileSize(*ZipPath);
-	UE_LOG(LogTemp, Log, TEXT("[GLC] Compression successful! ZIP size: %lld bytes"), ZipSize);
+	if (ZipSize <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GLC] ZIP file was created but is empty or invalid"));
+		return false;
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("[GLC] Compression successful! ZIP size: %lld bytes (%.2f MB)"), ZipSize, ZipSize / (1024.0 * 1024.0));
 	
 	return true;
 }
@@ -1861,6 +2249,23 @@ void SGLCManagerWindow::UploadBuildToCloud(const FString& ZipPath)
 					ApiClient->UploadFileAsync(Response.UploadUrl, ZipPath,
 						[this, Response, FileSize](bool bSuccess, FString Error, float Progress)
 						{
+							// Check if upload was cancelled
+							if (!bSuccess && Progress < 0.0f)
+							{
+								AsyncTask(ENamedThreads::GameThread, [this, Error]()
+								{
+									StatusMessage = TEXT("⚠️ Upload cancelled by user");
+									StatusMessageType = TEXT("Warning");
+									bIsUploading = false;
+									UploadProgress = 0.0f;
+									if (StatusMessageText.IsValid())
+									{
+										StatusMessageText->SetText(FText::FromString(StatusMessage));
+									}
+								});
+								return;
+							}
+							
 							// Check if this is a real error (not just a progress update)
 							if (!bSuccess && Progress >= 1.0f)
 							{

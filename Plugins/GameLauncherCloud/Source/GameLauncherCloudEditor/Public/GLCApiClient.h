@@ -96,10 +96,19 @@ public:
 	
 	// Build status
 	void GetBuildStatusAsync(int64 AppBuildId, TFunction<void(bool, FString, FGLCBuildStatusResponse)> Callback);
+	
+	// Build cancellation
+	void CancelBuildAsync(int64 AppBuildId, TFunction<void(bool, FString)> Callback);
+	
+	// Cancel active upload
+	void CancelActiveUpload();
 
 private:
 	FString BaseUrl;
 	FString AuthToken;
+	
+	// Active upload request tracking
+	TSharedPtr<IHttpRequest, ESPMode::ThreadSafe> ActiveUploadRequest;
 	
 	// Helper functions
 	TSharedPtr<FJsonObject> ParseJsonResponse(const FString& ResponseString);
