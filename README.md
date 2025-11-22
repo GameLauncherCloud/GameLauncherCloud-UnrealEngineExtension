@@ -1,6 +1,6 @@
 # Game Launcher Cloud - Manager for Unreal Engine
 
-**Promote your game development with Game Launcher Cloud!**
+**Build and upload your game from Unity to Game Launcher Cloud!**
 
 A powerful Unreal Engine Editor plugin that allows you to build and upload your game patches directly to [Game Launcher Cloud](https://gamelauncher.cloud) platform from within Unreal Engine.
 
