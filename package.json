@@ -24,12 +24,12 @@
   "homepage": "https://gamelauncher.cloud",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension.git"
+    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension.git"
   },
   "bugs": {
-    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/issues",
+    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension/issues",
     "email": "support@gamelauncher.cloud"
   },
   "documentation": "https://help.gamelauncher.cloud",
-  "changelogUrl": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/blob/main/CHANGELOG.md"
+  "changelogUrl": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension/blob/main/CHANGELOG.md"
 }

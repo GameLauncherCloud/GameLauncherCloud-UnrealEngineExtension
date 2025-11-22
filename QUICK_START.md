@@ -19,7 +19,7 @@ Before you start, make sure you have:
 
 #### Option A: Install to Project (Recommended)
 
-1. Download the plugin from [Releases](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/releases)
+1. Download the plugin from [Releases](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension/releases)
 2. Extract the `GameLauncherCloud` folder to:
    ```
    YourProject/Plugins/GameLauncherCloud/
@@ -186,7 +186,7 @@ Keep an eye on your Game Launcher Cloud storage usage:
 - 📧 Email: support@gamelauncher.cloud
 - 💬 Discord: [Join our community](https://discord.com/invite/FpWvUQ2CJP)
 - 📚 Full Documentation: [docs.gamelauncher.cloud](https://help.gamelauncher.cloud)
-- 🐛 Report bugs: [GitHub Issues](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/issues)
+- 🐛 Report bugs: [GitHub Issues](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension/issues)
 
 ---
 

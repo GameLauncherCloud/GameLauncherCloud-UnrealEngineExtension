@@ -1,0 +1,7 @@
+{
+	"apiKeyProduction": "YOUR_API_KEY",
+	"authToken": "{OVERWRITTEN_BY_SERVER}",
+	"userEmail": "{OVERWRITTEN_BY_SERVER}",
+	"userPlan": "{OVERWRITTEN_BY_SERVER}",
+	"apiUrl": "https://api.gamelauncher.cloud"
+}

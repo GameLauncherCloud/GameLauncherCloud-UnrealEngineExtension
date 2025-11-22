@@ -28,7 +28,7 @@ A powerful Unreal Engine Editor plugin that allows you to build and upload your 
 
 ### Method 1: Install to Project (Recommended)
 
-1. Download the latest release from [GitHub Releases](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealEngineExtension/releases)
 2. Extract the plugin to your project's `Plugins` folder:
    ```
    YourProject/Plugins/GameLauncherCloud/
