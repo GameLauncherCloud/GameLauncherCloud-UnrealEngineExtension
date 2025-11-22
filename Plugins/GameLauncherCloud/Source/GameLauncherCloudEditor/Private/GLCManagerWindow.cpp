@@ -31,6 +31,7 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 	UploadProgress = 0.0f;
 	SelectedAppIndex = 0;
 	CurrentBuildId = 0;
+	CurrentEnvironment = TEXT("Production");
 	
 	ApiUrl = TEXT("https://api.gamelauncher.cloud");
 	
@@ -38,43 +39,113 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 	
 	ApiClient = MakeShareable(new FGLCApiClient(ApiUrl, AuthToken));
 	
+	// Auto-load apps if already authenticated
+	if (bIsAuthenticated && !AuthToken.IsEmpty())
+	{
+		OnLoadAppsClicked();
+	}
+	
 	ChildSlot
 	[
 		SNew(SVerticalBox)
 		
-		// Header
+		// Header with epic gradient background
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(20.0f, 20.0f, 20.0f, 10.0f)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 15.0f, 0.0f)
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderBackgroundColor(FLinearColor(0.15f, 0.25f, 0.45f, 0.95f))
+			.Padding(20.0f)
 			[
-				SNew(SImage)
-				.Image(FSlateIcon("GameLauncherCloudStyle", "GameLauncherCloud.Icon").GetIcon())
-				.DesiredSizeOverride(FVector2D(48.0f, 48.0f))
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 15.0f, 0.0f)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("Title", "Game Launcher Cloud"))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 24))
+					SNew(SImage)
+					.Image(FSlateIcon("GameLauncherCloudStyle", "GameLauncherCloud.Icon").GetIcon())
+					.DesiredSizeOverride(FVector2D(52.0f, 52.0f))
 				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("Subtitle", "Build and Upload Manager for Unreal Engine"))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("Title", "Game Launcher Cloud"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 26))
+						.ColorAndOpacity(FLinearColor(0.9f, 0.95f, 1.0f))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("Subtitle", "Build and Upload Manager for Unreal Engine"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Italic", 12))
+						.ColorAndOpacity(FLinearColor(0.7f, 0.85f, 1.0f, 0.9f))
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.HAlign(HAlign_Right)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() { 
+							return bIsAuthenticated ? 
+								FText::Format(LOCTEXT("Connected", "✓ {0}"), FText::FromString(UserEmail)) : 
+								LOCTEXT("NotConnected", "Not connected");
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+						.ColorAndOpacity_Lambda([this]() { 
+							return bIsAuthenticated ? 
+								FLinearColor(0.4f, 1.0f, 0.4f) : 
+								FLinearColor(1.0f, 0.7f, 0.4f);
+						})
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.HAlign(HAlign_Right)
+					.Padding(0.0f, 2.0f)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]() {
+							return bIsAuthenticated && !UserPlan.IsEmpty() ?
+								FText::Format(LOCTEXT("PlanLabel", "Plan: {0}"), FText::FromString(UserPlan)) :
+								FText::GetEmpty();
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+						.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f, 0.8f))
+						.Visibility_Lambda([this]() {
+							return (bIsAuthenticated && !UserPlan.IsEmpty()) ? EVisibility::Visible : EVisibility::Collapsed;
+						})
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.HAlign(HAlign_Right)
+					.Padding(0.0f, 5.0f, 0.0f, 0.0f)
+					[
+						SNew(SButton)
+						.ButtonStyle(FAppStyle::Get(), "FlatButton.Danger")
+						.ForegroundColor(FLinearColor::White)
+						.ContentPadding(FMargin(12.0f, 6.0f))
+						.OnClicked(this, &SGLCManagerWindow::OnLogoutClicked)
+						.Visibility_Lambda([this]() { return bIsAuthenticated ? EVisibility::Visible : EVisibility::Collapsed; })
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("LogoutButton", "Logout"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+						]
+					]
 				]
 			]
 		]
@@ -116,6 +187,26 @@ void SGLCManagerWindow::Construct(const FArguments& InArgs)
 				]
 			]
 		]
+		
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(20.0f, 0.0f)
+		[
+			SNew(SSeparator)
+		]
+		
+		// Environment label at bottom
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(20.0f, 10.0f)
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]() {
+				return FText::Format(LOCTEXT("EnvironmentLabel", "Environment: {0}"), FText::FromString(CurrentEnvironment));
+			})
+			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 10))
+			.ColorAndOpacity(FLinearColor(0.5f, 0.6f, 0.7f, 0.7f))
+		]
 	];
 }
 
@@ -126,185 +217,341 @@ void SGLCManagerWindow::Tick(const FGeometry& AllottedGeometry, const double InC
 
 TSharedRef<SWidget> SGLCManagerWindow::ConstructLoginTab()
 {
-	return SNew(SVerticalBox)
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.BorderBackgroundColor(FLinearColor(0.15f, 0.15f, 0.2f, 0.9f))
+		.Padding(30.0f)
 		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("LoginTitle", "Login to Game Launcher Cloud"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
-		]
+			SNew(SVerticalBox)
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("LoginTitle", "🔐 Login to Game Launcher Cloud"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 18))
+				.ColorAndOpacity(FLinearColor(0.9f, 0.95f, 1.0f))
+			]
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 20.0f, 0.0f, 10.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ApiKeyLabel", "API Key"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+				.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+			]
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.Padding(FMargin(10.0f, 8.0f))
+				[
+					SAssignNew(ApiKeyTextBox, SEditableTextBox)
+					.HintText(LOCTEXT("ApiKeyHint", "glc_xxxxxxxxxxxxx"))
+					.IsPassword(true)
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+					.OnTextChanged_Lambda([this](const FText& NewText) { ApiKeyInput = NewText.ToString(); })
+				]
+			]
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 20.0f)
+			.HAlign(HAlign_Center)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "FlatButton.Success")
+				.ForegroundColor(FLinearColor::White)
+				.ContentPadding(FMargin(40.0f, 12.0f))
+				.OnClicked(this, &SGLCManagerWindow::OnLoginWithApiKeyClicked)
+				.IsEnabled_Lambda([this]() { return !bIsLoggingIn && !ApiKeyInput.IsEmpty(); })
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() { 
+						return bIsLoggingIn ? 
+							LOCTEXT("Logging", "⏳ Logging in...") : 
+							LOCTEXT("LoginButton", "Login with API Key");
+					})
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+				]
+			]
 		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("ApiKeyLabel", "API Key"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			SAssignNew(ApiKeyTextBox, SEditableTextBox)
-			.HintText(LOCTEXT("ApiKeyHint", "Enter your Game Launcher Cloud API Key"))
-			.IsPassword(true)
-			.OnTextChanged_Lambda([this](const FText& NewText) { ApiKeyInput = NewText.ToString(); })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("LoginButton", "Login with API Key"))
-			.OnClicked(this, &SGLCManagerWindow::OnLoginWithApiKeyClicked)
-			.IsEnabled_Lambda([this]() { return !bIsLoggingIn && !ApiKeyInput.IsEmpty(); })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SAssignNew(StatusMessageText, STextBlock)
-			.Text(FText::FromString(StatusMessage))
-			.Visibility_Lambda([this]() { return StatusMessage.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 20.0f, 0.0f, 0.0f)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("GetApiKeyInfo", "Get your API Key from:\nhttps://app.gamelauncher.cloud/user/api-keys"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 10))
-			.ColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.6f, 0.6f)))
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 15.0f)
+			.HAlign(HAlign_Center)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor_Lambda([this]() {
+					return StatusMessageType == TEXT("Error") ? 
+						FLinearColor(0.8f, 0.2f, 0.2f, 0.8f) : 
+						FLinearColor(0.2f, 0.6f, 0.3f, 0.8f);
+				})
+				.Padding(FMargin(15.0f, 10.0f))
+				.Visibility_Lambda([this]() { return StatusMessage.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				[
+					SAssignNew(StatusMessageText, STextBlock)
+					.Text(FText::FromString(StatusMessage))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+					.ColorAndOpacity(FLinearColor::White)
+				]
+			]
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 20.0f, 0.0f, 0.0f)
+			.HAlign(HAlign_Center)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.HAlign(HAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("GetApiKeyLabel", "Get your API Key from:"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Italic", 11))
+					.ColorAndOpacity(FLinearColor(0.7f, 0.8f, 0.9f, 0.8f))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.HAlign(HAlign_Center)
+				.Padding(0.0f, 5.0f)
+				[
+					SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.OnClicked_Lambda([]() {
+						FPlatformProcess::LaunchURL(TEXT("https://api.gamelauncher.cloud/user/api-keys"), nullptr, nullptr);
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("ApiKeyLink", "https://api.gamelauncher.cloud/user/api-keys"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Italic", 11))
+						.ColorAndOpacity(FLinearColor(0.4f, 0.8f, 1.0f))
+					]
+				]
+			]
 		];
 }
 
 TSharedRef<SWidget> SGLCManagerWindow::ConstructBuildUploadTab()
 {
-	return SNew(SVerticalBox)
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.BorderBackgroundColor(FLinearColor(0.15f, 0.15f, 0.2f, 0.9f))
+		.Padding(30.0f)
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
+			SNew(SVerticalBox)
+			
+			// Welcome header with logout
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.BorderBackgroundColor(FLinearColor(0.2f, 0.6f, 0.9f, 0.3f))
+				.Padding(FMargin(20.0f, 15.0f))
+				[
+					SNew(STextBlock)
+					.Text(FText::Format(LOCTEXT("WelcomeMessage", "👋 Welcome, {0}!"), FText::FromString(UserEmail)))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+					.ColorAndOpacity(FLinearColor(0.9f, 0.95f, 1.0f))
+				]
+			]
+			
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 25.0f, 0.0f, 15.0f)
 			[
 				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("WelcomeMessage", "Welcome, {0}"), FText::FromString(UserEmail)))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+				.Text(LOCTEXT("BuildUploadTitle", "🚀 Build & Deploy"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 18))
+				.ColorAndOpacity(FLinearColor(0.9f, 0.95f, 1.0f))
 			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
+		
+			
+			// App selection section
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.Padding(FMargin(20.0f, 15.0f))
+				[
+					SNew(SVerticalBox)
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.FillWidth(1.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("SelectAppLabel", "📱 Select Application"))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+							.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "FlatButton.Info")
+							.ForegroundColor(FLinearColor::White)
+							.ContentPadding(FMargin(15.0f, 8.0f))
+							.OnClicked(this, &SGLCManagerWindow::OnLoadAppsClicked)
+							.IsEnabled_Lambda([this]() { return !bIsLoadingApps; })
+							[
+								SNew(STextBlock)
+								.Text_Lambda([this]() {
+									return bIsLoadingApps ? 
+										LOCTEXT("LoadingApps", "⏳ Loading...") : 
+										LOCTEXT("LoadAppsButton", "🔄 Reload Apps");
+								})
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+							]
+						]
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 10.0f, 0.0f, 0.0f)
+					[
+						SAssignNew(AppComboBox, SComboBox<TSharedPtr<FString>>)
+						.OptionsSource(&AppNames)
+						.OnSelectionChanged(this, &SGLCManagerWindow::OnAppSelected)
+						.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+						{
+							return SNew(STextBlock)
+								.Text(FText::FromString(*Item))
+								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12));
+						})
+						[
+							SNew(STextBlock)
+							.Text_Lambda([this]()
+							{
+								return SelectedApp.IsValid() ? FText::FromString(*SelectedApp) : LOCTEXT("SelectApp", "Select an app...");
+							})
+							.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+						]
+					]
+				]
+			]
+		
+			
+			// Build notes section
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 15.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.Padding(FMargin(20.0f, 15.0f))
+				[
+					SNew(SVerticalBox)
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("BuildNotesLabel", "📝 Build Notes (optional)"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+						.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f))
+					]
+					
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SAssignNew(BuildNotesTextBox, SEditableTextBox)
+						.HintText(LOCTEXT("BuildNotesHint", "What's new in this build?"))
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+						.OnTextChanged_Lambda([this](const FText& NewText) { BuildNotesInput = NewText.ToString(); })
+					]
+				]
+			]
+			
+			// Build & Upload button
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 20.0f)
+			.HAlign(HAlign_Center)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("LogoutButton", "Logout"))
-				.OnClicked(this, &SGLCManagerWindow::OnLogoutClicked)
+				.ButtonStyle(FAppStyle::Get(), "FlatButton.Success")
+				.ForegroundColor(FLinearColor::White)
+				.ContentPadding(FMargin(50.0f, 15.0f))
+				.OnClicked(this, &SGLCManagerWindow::OnBuildAndUploadClicked)
+				.IsEnabled_Lambda([this]() { return !bIsBuilding && !bIsUploading && AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() {
+						if (bIsBuilding) return LOCTEXT("Building", "🔨 Building...");
+						if (bIsUploading) return LOCTEXT("Uploading", "⬆️ Uploading...");
+						return LOCTEXT("BuildUploadButton", "🚀 Build & Upload to Cloud");
+					})
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+				]
 			]
-		]
 		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 20.0f, 0.0f, 0.0f)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("BuildUploadTitle", "Build & Upload"))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
+			
+			// Progress bar
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 15.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("SelectAppLabel", "Select App"))
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.Padding(FMargin(5.0f))
+				.Visibility_Lambda([this]() { return (bIsBuilding || bIsUploading) ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+					SAssignNew(UploadProgressBar, SProgressBar)
+					.Percent_Lambda([this]() { return UploadProgress; })
+					.FillColorAndOpacity(FLinearColor(0.2f, 0.7f, 1.0f))
+				]
 			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
+			
+			// Status message
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 10.0f)
+			.HAlign(HAlign_Center)
 			[
-				SNew(SButton)
-				.Text(LOCTEXT("LoadAppsButton", "Load My Apps"))
-				.OnClicked(this, &SGLCManagerWindow::OnLoadAppsClicked)
-				.IsEnabled_Lambda([this]() { return !bIsLoadingApps; })
-			]
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			SAssignNew(AppComboBox, SComboBox<TSharedPtr<FString>>)
-			.OptionsSource(&AppNames)
-			.OnSelectionChanged(this, &SGLCManagerWindow::OnAppSelected)
-			.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-			{
-				return SNew(STextBlock).Text(FText::FromString(*Item));
-			})
-			[
-				SNew(STextBlock)
-				.Text_Lambda([this]()
-				{
-					return SelectedApp.IsValid() ? FText::FromString(*SelectedApp) : LOCTEXT("SelectApp", "Select an app...");
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor_Lambda([this]() {
+					return StatusMessageType == TEXT("Error") ? 
+						FLinearColor(0.8f, 0.2f, 0.2f, 0.8f) : 
+						StatusMessageType == TEXT("Success") ?
+						FLinearColor(0.2f, 0.7f, 0.3f, 0.8f) :
+						FLinearColor(0.3f, 0.6f, 0.9f, 0.8f);
 				})
+				.Padding(FMargin(20.0f, 12.0f))
+				.Visibility_Lambda([this]() { return StatusMessage.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				[
+					SAssignNew(StatusMessageText, STextBlock)
+					.Text(FText::FromString(StatusMessage))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+					.ColorAndOpacity(FLinearColor::White)
+					.Justification(ETextJustify::Center)
+				]
 			]
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("BuildNotesLabel", "Build Notes (optional)"))
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			SAssignNew(BuildNotesTextBox, SEditableTextBox)
-			.HintText(LOCTEXT("BuildNotesHint", "What's new in this build?"))
-			.OnTextChanged_Lambda([this](const FText& NewText) { BuildNotesInput = NewText.ToString(); })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SNew(SButton)
-			.Text(LOCTEXT("BuildUploadButton", "Build & Upload to Game Launcher Cloud"))
-			.OnClicked(this, &SGLCManagerWindow::OnBuildAndUploadClicked)
-			.IsEnabled_Lambda([this]() { return !bIsBuilding && !bIsUploading && AvailableApps.Num() > 0 && SelectedAppIndex >= 0; })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(0.0f, 10.0f)
-		[
-			SAssignNew(UploadProgressBar, SProgressBar)
-			.Percent_Lambda([this]() { return UploadProgress; })
-			.Visibility_Lambda([this]() { return (bIsBuilding || bIsUploading) ? EVisibility::Visible : EVisibility::Collapsed; })
-		]
-		
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			SAssignNew(StatusMessageText, STextBlock)
-			.Text(FText::FromString(StatusMessage))
-			.Visibility_Lambda([this]() { return StatusMessage.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
 		];
 }
 
 TSharedRef<SWidget> SGLCManagerWindow::ConstructTipsTab()
 {
 	return SNew(SBorder)
-		.Padding(20.0f)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.BorderBackgroundColor(FLinearColor(0.25f, 0.15f, 0.35f, 0.3f))
+		.Padding(25.0f)
 		[
 			SNew(SVerticalBox)
 			
@@ -313,21 +560,29 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructTipsTab()
 			[
 				SNew(STextBlock)
 				.Text(LOCTEXT("TipsTitle", "💡 Tips for Better Builds"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 17))
+				.ColorAndOpacity(FLinearColor(0.9f, 0.85f, 1.0f))
 			]
 			
 			+ SVerticalBox::Slot()
 			.AutoHeight()
-			.Padding(0.0f, 10.0f)
+			.Padding(0.0f, 15.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("Tips", 
-					"• Test your build locally before uploading\n"
-					"• Write descriptive build notes\n"
-					"• Optimize textures and assets to reduce build size\n"
-					"• Use version control (Git) for your project\n"
-					"• Check the Game Launcher Cloud dashboard for build status\n"))
-				.AutoWrapText(true)
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+				.Padding(FMargin(20.0f, 15.0f))
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("Tips", 
+						"✓ Test your build locally before uploading\n"
+						"✓ Write descriptive build notes\n"
+						"✓ Optimize textures and assets to reduce build size\n"
+						"✓ Use version control (Git) for your project\n"
+						"✓ Check the Game Launcher Cloud dashboard for build status"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+					.ColorAndOpacity(FLinearColor(0.8f, 0.9f, 1.0f, 0.9f))
+					.AutoWrapText(true)
+				]
 			]
 		];
 }
@@ -363,7 +618,44 @@ FReply SGLCManagerWindow::OnLoginWithApiKeyClicked()
 			bIsAuthenticated = true;
 			AuthToken = Response.Token;
 			UserEmail = Response.Email;
+			// Extract plan name
+			if (!Response.PlanName.IsEmpty())
+			{
+				UserPlan = Response.PlanName;
+			}
+			else
+			{
+				UserPlan = TEXT("Free");
+			}
 			ApiClient->SetAuthToken(AuthToken);
+			
+			// Save API key to config (before SaveConfig to ensure it's preserved)
+			if (!ApiKeyInput.IsEmpty())
+			{
+				// Load existing config
+				FString ConfigPath = FPaths::ProjectPluginsDir() / TEXT("GameLauncherCloud/Config/glc_config.json");
+				FString ExistingContent;
+				TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+				
+				if (FFileHelper::LoadFileToString(ExistingContent, *ConfigPath))
+				{
+					TSharedPtr<FJsonObject> ExistingJson;
+					TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ExistingContent);
+					if (FJsonSerializer::Deserialize(Reader, ExistingJson) && ExistingJson.IsValid())
+					{
+						JsonObject = ExistingJson;
+					}
+				}
+				
+				// Save API key for Production environment
+				JsonObject->SetStringField(TEXT("apiKeyProduction"), ApiKeyInput);
+				
+				FString OutputString;
+				TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+				FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+				FFileHelper::SaveStringToFile(OutputString, *ConfigPath);
+			}
+			
 			SaveConfig();
 			
 			StatusMessage = TEXT("Login successful!");
@@ -395,7 +687,8 @@ FReply SGLCManagerWindow::OnLogoutClicked()
 	bIsAuthenticated = false;
 	AuthToken.Empty();
 	UserEmail.Empty();
-	ApiKeyInput.Empty();
+	UserPlan.Empty();
+	// Keep ApiKeyInput - don't clear it so it shows in login screen
 	AvailableApps.Empty();
 	AppNames.Empty();
 	SaveConfig();
@@ -432,7 +725,7 @@ FReply SGLCManagerWindow::OnLoadAppsClicked()
 			{
 				SelectedApp = AppNames[0];
 				SelectedAppIndex = 0;
-				StatusMessage = FString::Printf(TEXT("Loaded %d app(s)"), Apps.Num());
+				StatusMessage.Empty(); // Clear loading message
 				StatusMessageType = TEXT("Success");
 			}
 			else
@@ -496,8 +789,28 @@ void SGLCManagerWindow::SaveConfig()
 	FString ConfigPath = FPaths::ProjectPluginsDir() / TEXT("GameLauncherCloud/Config/glc_config.json");
 	
 	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+	
+	// Load existing config to preserve API keys
+	FString ExistingContent;
+	if (FFileHelper::LoadFileToString(ExistingContent, *ConfigPath))
+	{
+		TSharedPtr<FJsonObject> ExistingJson;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ExistingContent);
+		if (FJsonSerializer::Deserialize(Reader, ExistingJson) && ExistingJson.IsValid())
+		{
+			// Preserve API keys from existing config
+			FString ApiKeyProduction;
+			ExistingJson->TryGetStringField(TEXT("apiKeyProduction"), ApiKeyProduction);
+			if (!ApiKeyProduction.IsEmpty())
+			{
+				JsonObject->SetStringField(TEXT("apiKeyProduction"), ApiKeyProduction);
+			}
+		}
+	}
+	
 	JsonObject->SetStringField(TEXT("authToken"), AuthToken);
 	JsonObject->SetStringField(TEXT("userEmail"), UserEmail);
+	JsonObject->SetStringField(TEXT("userPlan"), UserPlan);
 	JsonObject->SetStringField(TEXT("apiUrl"), ApiUrl);
 	
 	FString OutputString;
@@ -521,7 +834,16 @@ void SGLCManagerWindow::LoadConfig()
 		{
 			JsonObject->TryGetStringField(TEXT("authToken"), AuthToken);
 			JsonObject->TryGetStringField(TEXT("userEmail"), UserEmail);
+			JsonObject->TryGetStringField(TEXT("userPlan"), UserPlan);
 			JsonObject->TryGetStringField(TEXT("apiUrl"), ApiUrl);
+			
+			// Load API Key for current environment (Production)
+			FString ApiKeyProduction;
+			JsonObject->TryGetStringField(TEXT("apiKeyProduction"), ApiKeyProduction);
+			if (!ApiKeyProduction.IsEmpty())
+			{
+				ApiKeyInput = ApiKeyProduction;
+			}
 			
 			if (!AuthToken.IsEmpty())
 			{

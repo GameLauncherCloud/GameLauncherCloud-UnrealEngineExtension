@@ -52,6 +52,8 @@ private:
 	FString ApiUrl;
 	FString AuthToken;
 	FString UserEmail;
+	FString UserPlan;
+	FString CurrentEnvironment;
 	bool bIsAuthenticated;
 	
 	// ========== UI STATE ========== //
