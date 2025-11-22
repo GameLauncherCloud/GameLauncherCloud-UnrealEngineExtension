@@ -2012,13 +2012,38 @@ void SGLCManagerWindow::CheckBuildStatus()
 			
 			// Update UI based on status
 			FString StatusIcon = GetStatusIcon(Response.Status);
-			StatusMessage = FString::Printf(TEXT("%s Build #%lld: %s"), *StatusIcon, Response.AppBuildId, *Response.Status);
+			FString StatusDisplayName = GetStatusDisplayName(Response.Status);
 			
-			// Add progress information if available
+			// Build detailed status message
 			if (Response.StageProgress > 0)
 			{
-				StatusMessage += FString::Printf(TEXT(" (%d%%)"), Response.StageProgress);
+				StatusMessage = FString::Printf(TEXT("%s Build #%lld: %s (%d%%)"), 
+					*StatusIcon, Response.AppBuildId, *StatusDisplayName, Response.StageProgress);
+				
+				// Update progress bar based on stage and progress
+				float BaseProgress = GetStageBaseProgress(Response.Status);
+				float StageWeight = GetStageWeight(Response.Status);
+				UploadProgress = BaseProgress + (Response.StageProgress / 100.0f) * StageWeight;
 			}
+			else
+			{
+				StatusMessage = FString::Printf(TEXT("%s Build #%lld: %s"), 
+					*StatusIcon, Response.AppBuildId, *StatusDisplayName);
+				
+				// Set progress based on stage
+				UploadProgress = GetStageBaseProgress(Response.Status);
+			}
+			
+			// Update UI
+			AsyncTask(ENamedThreads::GameThread, [this]()
+			{
+				if (StatusMessageText.IsValid())
+				{
+					StatusMessageText->SetText(FText::FromString(StatusMessage));
+				}
+			});
+			
+			UE_LOG(LogTemp, Log, TEXT("[GLC] Build status: %s (Progress: %.1f%%)"), *StatusMessage, UploadProgress * 100.0f);
 			
 			// Check if build is in final state
 			if (Response.Status == TEXT("Completed"))
@@ -2090,6 +2115,61 @@ FString SGLCManagerWindow::GetStatusIcon(const FString& Status)
 	if (Status == TEXT("Deleted")) return TEXT("🗑️");
 	
 	return TEXT("📊");
+}
+
+FString SGLCManagerWindow::GetStatusDisplayName(const FString& Status)
+{
+	if (Status == TEXT("Pending")) return TEXT("Pending");
+	if (Status == TEXT("GeneratingPresignedUrl")) return TEXT("Preparing Upload");
+	if (Status == TEXT("UploadingBuild")) return TEXT("Uploading Build");
+	if (Status == TEXT("Enqueued")) return TEXT("Queued for Processing");
+	if (Status == TEXT("DownloadingBuild")) return TEXT("Downloading Build");
+	if (Status == TEXT("DownloadingPreviousBuild")) return TEXT("Downloading Previous Build");
+	if (Status == TEXT("UnzippingBuild")) return TEXT("Extracting Build");
+	if (Status == TEXT("UnzippingPreviousBuild")) return TEXT("Extracting Previous Build");
+	if (Status == TEXT("CreatingPatch")) return TEXT("Creating Patch");
+	if (Status == TEXT("DeployingPatch")) return TEXT("Deploying Patch");
+	if (Status == TEXT("Completed")) return TEXT("Completed");
+	if (Status == TEXT("Failed")) return TEXT("Failed");
+	if (Status == TEXT("Cancelled")) return TEXT("Cancelled");
+	if (Status == TEXT("Deleted")) return TEXT("Deleted");
+	
+	return Status;
+}
+
+float SGLCManagerWindow::GetStageBaseProgress(const FString& Status)
+{
+	// Map each stage to a base progress percentage (0.0 to 1.0)
+	if (Status == TEXT("Pending")) return 0.0f;
+	if (Status == TEXT("GeneratingPresignedUrl")) return 0.05f;
+	if (Status == TEXT("UploadingBuild")) return 0.10f;
+	if (Status == TEXT("Enqueued")) return 0.30f;
+	if (Status == TEXT("DownloadingBuild")) return 0.35f;
+	if (Status == TEXT("DownloadingPreviousBuild")) return 0.40f;
+	if (Status == TEXT("UnzippingBuild")) return 0.50f;
+	if (Status == TEXT("UnzippingPreviousBuild")) return 0.60f;
+	if (Status == TEXT("CreatingPatch")) return 0.70f;
+	if (Status == TEXT("DeployingPatch")) return 0.85f;
+	if (Status == TEXT("Completed")) return 1.0f;
+	
+	return 0.0f;
+}
+
+float SGLCManagerWindow::GetStageWeight(const FString& Status)
+{
+	// How much progress each stage contributes (0.0 to 1.0)
+	if (Status == TEXT("Pending")) return 0.05f;
+	if (Status == TEXT("GeneratingPresignedUrl")) return 0.05f;
+	if (Status == TEXT("UploadingBuild")) return 0.20f;
+	if (Status == TEXT("Enqueued")) return 0.05f;
+	if (Status == TEXT("DownloadingBuild")) return 0.05f;
+	if (Status == TEXT("DownloadingPreviousBuild")) return 0.10f;
+	if (Status == TEXT("UnzippingBuild")) return 0.10f;
+	if (Status == TEXT("UnzippingPreviousBuild")) return 0.10f;
+	if (Status == TEXT("CreatingPatch")) return 0.15f;
+	if (Status == TEXT("DeployingPatch")) return 0.15f;
+	
+	return 0.05f;
 }
 
 void SGLCManagerWindow::UploadBuildToCloud(const FString& ZipPath)

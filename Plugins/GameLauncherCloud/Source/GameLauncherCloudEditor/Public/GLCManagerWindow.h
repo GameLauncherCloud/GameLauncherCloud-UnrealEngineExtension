@@ -47,6 +47,9 @@ private:
 	void StopBuildStatusMonitoring();
 	void CheckBuildStatus();
 	FString GetStatusIcon(const FString& Status);
+	FString GetStatusDisplayName(const FString& Status);
+	float GetStageBaseProgress(const FString& Status);
+	float GetStageWeight(const FString& Status);
 	
 	// Path helpers
 	FString GetBuildSourcePath() const;
