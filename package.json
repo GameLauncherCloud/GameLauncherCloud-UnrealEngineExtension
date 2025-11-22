@@ -1,0 +1,35 @@
+{
+  "name": "com.gamelaunchercloud.unreal-manager",
+  "displayName": "Game Launcher Cloud - Manager for Unreal Engine",
+  "version": "1.0.0",
+  "engine": "5.0",
+  "description": "Build and upload your Unreal Engine game patches directly to Game Launcher Cloud platform. Features include API key authentication, one-click build & upload, real-time progress tracking, and helpful tips for optimization.",
+  "keywords": [
+    "game launcher cloud",
+    "patch",
+    "build",
+    "upload",
+    "distribution",
+    "game development",
+    "deployment",
+    "unreal engine"
+  ],
+  "category": "Tools",
+  "author": {
+    "name": "Game Launcher Cloud",
+    "email": "support@gamelauncher.cloud",
+    "url": "https://gamelauncher.cloud"
+  },
+  "license": "MIT",
+  "homepage": "https://gamelauncher.cloud",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/issues",
+    "email": "support@gamelauncher.cloud"
+  },
+  "documentation": "https://help.gamelauncher.cloud",
+  "changelogUrl": "https://github.com/GameLauncherCloud/GameLauncherCloud-UnrealExtension/blob/main/CHANGELOG.md"
+}

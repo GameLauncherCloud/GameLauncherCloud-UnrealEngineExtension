@@ -1,0 +1,23 @@
+# Unreal Engine
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Visual Studio
+.vs/
+.vscode/
+
+# Config (contains API keys)
+Config/glc_config.json
+
+# OS
+.DS_Store
+Thumbs.db
