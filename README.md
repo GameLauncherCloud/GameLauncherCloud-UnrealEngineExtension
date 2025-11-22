@@ -140,21 +140,6 @@ Need help? We're here for you!
 - 📚 Documentation: [help.gamelauncher.cloud](https://help.gamelauncher.cloud)
 - 🌐 Website: [gamelauncher.cloud](https://gamelauncher.cloud)
 
-## 🐛 Known Issues
-
-- Full UAT (Unreal Automation Tool) integration is in development
-- Multipart upload for files > 500MB coming soon
-- Build status monitoring requires polling
-
-## 🗺️ Roadmap
-
-- [ ] Full UAT integration for automated builds
-- [ ] Support for all Unreal Engine platforms
-- [ ] Build configuration presets
-- [ ] Incremental patch support
-- [ ] Build history viewer
-- [ ] Advanced compression options
-
 ## 📝 License
 
 This plugin is provided free of charge for use with Game Launcher Cloud platform.
@@ -162,6 +147,7 @@ This plugin is provided free of charge for use with Game Launcher Cloud platform
 ## 🎮 About Game Launcher Cloud
 
 Game Launcher Cloud is a comprehensive platform for game developers to:
+- Create custom game launchers in minutes
 - Distribute game patches efficiently
 - Manage multiple games and versions
 - Track downloads and analytics
