@@ -339,12 +339,12 @@ TSharedRef<SWidget> SGLCManagerWindow::ConstructLoginTab()
 					SNew(SButton)
 					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 					.OnClicked_Lambda([]() {
-						FPlatformProcess::LaunchURL(TEXT("https://api.gamelauncher.cloud/user/api-keys"), nullptr, nullptr);
+						FPlatformProcess::LaunchURL(TEXT("https://app.gamelauncher.cloud/user/api-keys"), nullptr, nullptr);
 						return FReply::Handled();
 					})
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("ApiKeyLink", "https://api.gamelauncher.cloud/user/api-keys"))
+						.Text(LOCTEXT("ApiKeyLink", "https://app.gamelauncher.cloud/user/api-keys"))
 						.Font(FCoreStyle::GetDefaultFontStyle("Italic", 11))
 						.ColorAndOpacity(FLinearColor(0.4f, 0.8f, 1.0f))
 					]
