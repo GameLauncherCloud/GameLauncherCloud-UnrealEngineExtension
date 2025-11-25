@@ -85,6 +85,28 @@ Copy-Item "$PackageDir\Resources" "$TempDir\$PLUGIN_NAME\Resources" -Recurse
 Copy-Item "$PackageDir\Source" "$TempDir\$PLUGIN_NAME\Source" -Recurse
 Copy-Item "$PackageDir\$PLUGIN_NAME.uplugin" "$TempDir\$PLUGIN_NAME\"
 
+# Ensure Config directory exists
+if (-not (Test-Path "$TempDir\$PLUGIN_NAME\Config")) {
+    New-Item -ItemType Directory -Path "$TempDir\$PLUGIN_NAME\Config" | Out-Null
+}
+
+# Copy FilterPlugin.ini from source (RunUAT may not include it)
+$SourceFilterPlugin = Join-Path $ProjectRoot "Plugins\$PLUGIN_NAME\Config\FilterPlugin.ini"
+if (Test-Path $SourceFilterPlugin) {
+    Copy-Item $SourceFilterPlugin "$TempDir\$PLUGIN_NAME\Config\" -Force
+    Write-Host "      [OK] FilterPlugin.ini included" -ForegroundColor Green
+}
+
+# Copy example config file
+$SourceExampleConfig = Join-Path $ProjectRoot "Plugins\$PLUGIN_NAME\Config\glc_config_example.json"
+if (Test-Path $SourceExampleConfig) {
+    Copy-Item $SourceExampleConfig "$TempDir\$PLUGIN_NAME\Config\" -Force
+    Write-Host "      [OK] glc_config_example.json included" -ForegroundColor Green
+}
+
+# Remove user configuration file (contains API keys)
+Remove-Item "$TempDir\$PLUGIN_NAME\Config\glc_config.json" -Force -ErrorAction SilentlyContinue
+
 # Remove .pdb files (debug symbols not needed for distribution)
 Get-ChildItem "$TempDir\$PLUGIN_NAME\Binaries\Win64" -Filter "*.pdb" -ErrorAction SilentlyContinue | Remove-Item -Force
 
