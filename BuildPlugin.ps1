@@ -80,7 +80,6 @@ if (Test-Path $TempDir) {
 New-Item -ItemType Directory -Path "$TempDir\$PLUGIN_NAME" | Out-Null
 
 # Copy only necessary files (no Intermediate)
-Copy-Item "$PackageDir\Binaries" "$TempDir\$PLUGIN_NAME\Binaries" -Recurse
 Copy-Item "$PackageDir\Config" "$TempDir\$PLUGIN_NAME\Config" -Recurse -ErrorAction SilentlyContinue
 Copy-Item "$PackageDir\Resources" "$TempDir\$PLUGIN_NAME\Resources" -Recurse
 Copy-Item "$PackageDir\Source" "$TempDir\$PLUGIN_NAME\Source" -Recurse
