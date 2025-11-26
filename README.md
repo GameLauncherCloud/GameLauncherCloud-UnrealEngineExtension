@@ -1,12 +1,22 @@
+<div align="center">
+   
 # Game Launcher Cloud - Manager for Unreal Engine
-
-<img width="2800" height="720" alt="Game Launcher Cloud for Unreal Engine - Full Logo with Background" src="https://github.com/user-attachments/assets/9fef4b4f-a797-4ae4-aa42-12f59d9dc6dc" />
+### **The Next-Generation Custom Game Launchers Creator Platform**
+   
+<img width="2800" height="720" alt="Game Launcher Cloud for Unreal Engine - Full Logo with Background" src="https://github.com/user-attachments/assets/0c1dde48-a813-4d00-9fe4-86e1067d4ad6" />
 
 **Build and upload your game from Unreal Engine to Game Launcher Cloud!**
 
-A powerful Unreal Engine Editor plugin that allows you to build and upload your game patches directly to [Game Launcher Cloud](https://gamelauncher.cloud) platform from within Unreal Engine.
+[![Website](https://img.shields.io/badge/Website-gamelauncher.cloud-blue?style=for-the-badge&logo=internet-explorer)](https://gamelauncher.cloud/)
+[![Status](https://img.shields.io/badge/Status-Live-success?style=for-the-badge)](https://gamelauncher.cloud/)
+[![Platform](https://img.shields.io/badge/Platform-Cross--Platform-orange?style=for-the-badge)](https://gamelauncher.cloud/)
+[![Unreal Engine Extension](https://img.shields.io/badge/UnrealEngine-Marketplace-purple?style=for-the-badge&logo=unreal-engine)](https://www.fab.com/listings/af88972c-9d69-42cd-bcaa-109bb8dd31c6)
+
+</div>
 
 ## 🌟 Features
+
+A powerful Unreal Engine Editor plugin that allows you to build and upload your game patches directly to [Game Launcher Cloud](https://gamelauncher.cloud) platform from within Unreal Engine.
 
 ### ✓ **Connect to Your Account**
 - Easy authentication using **API Key**
